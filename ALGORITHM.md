@@ -2,15 +2,19 @@
 
 ## Overview
 
-1. **Find candidate heads**: Query all heads in `ancestors(bookmarks()) ~ ::trunk()`.
+1. **Find candidate heads**: Query all heads in
+   `ancestors(bookmarks()) ~ ::trunk()`.
 
 2. **Build the commit tree**: Walk backwards from each head, tracking which
    changesets have bookmarks (these are submission candidates).
 
 3. **Handle merge commits**: Merge commits are permitted only if all paths
    reunify before reaching the next bookmark or `trunk()`. For example,
-   `A→(B, C)→D` is valid if B, C, and D are not in `trunk()` and no
-   intervening bookmarks exist. Otherwise, halt the walk for that path.
+   `A→(B, C)→D` is valid if B, C, and D are not in `trunk()` and no intervening
+   bookmarks exist. Otherwise, halt the walk for that path and throw out
+   whatever we walked to get there; none of that's eligible for stacking. (We
+   may have multiple heads we're walking back from, so this doesn't mean the
+   entire program necessarily bails.)
 
 4. **Select a bookmark**: Prompt the user to select exactly one bookmark. This
    bookmark represents the furthest descendant they wish to submit; ancestral
@@ -54,6 +58,7 @@ The stack comment format:
 
 ```markdown
 <!-- jj-domino -->
+
 This PR is part of a stack:
 
 1. [title of bottom PR](link to PR)
@@ -67,5 +72,5 @@ This PR is part of a stack:
 
 - **`trunk()`**: A built-in Jujutsu revset alias, typically resolving to the
   remote HEAD (`main` or `master`).
-- **Bookmark**: A Jujutsu bookmark (analogous to a Git branch) marking a
-  commit for submission.
+- **Bookmark**: A Jujutsu bookmark (analogous to a Git branch) marking a commit
+  for submission.
