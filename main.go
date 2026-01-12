@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"log"
 
 	"github.com/alecthomas/kong"
@@ -23,6 +25,15 @@ func (c *submitCmd) Run() error {
 }
 
 func (c *doctorCmd) Run() error {
+	client, err := getClient()
+	if err != nil {
+		return err
+	}
+	user, _, err := client.Users.Get(context.Background(), "")
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Authenticated as: %s\n", user.GetLogin())
 	return nil
 }
 
