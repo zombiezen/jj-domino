@@ -1,0 +1,15 @@
+image: archlinux
+sources:
+  - https://git.sr.ht/~bmp/jj-domino
+packages:
+  - go
+  - golangci-lint
+  - just
+tasks:
+  - test: |
+      cd jj-domino
+      just lint
+triggers:
+  - action: email
+    condition: failure
+    to: Benjamin Pollack <benjamin@bitquabit.com>
