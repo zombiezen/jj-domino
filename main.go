@@ -14,13 +14,31 @@ type cli struct {
 }
 
 type submitCmd struct {
-	Draft        bool   `short:"d" help:"Submit PR as draft"`
-	TemplatePath string `short:"t" help:"Template path"`
+	Draft        bool    `short:"d" help:"Submit PR as draft"`
+	TemplatePath *string `short:"t" help:"Template path"`
+	Root         *string `short:"R" help:"Optional repository root (defaults to \"jj root\")"`
 }
 
 type doctorCmd struct{}
 
 func (c *submitCmd) Run() error {
+	var root string
+	if c.Root != nil {
+		root = *c.Root
+	} else {
+		var err error
+		root, err = getCurrentRoot()
+		if err != nil {
+			return err
+		}
+	}
+	fmt.Printf("root: %#v\n", root)
+	r := NewRepository(root)
+	changes, err := r.getChangesets()
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%#v\n", changes)
 	return nil
 }
 
