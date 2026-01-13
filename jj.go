@@ -26,21 +26,53 @@ func (r *Repository) runJj(args ...string) ([]byte, error) {
 	return cmd.Output()
 }
 
+type Bookmark struct {
+	Name   string
+	Remote string
+	Target []string
+}
+
+func (r *Repository) getBookmarks() (map[string][]string, error) {
+	bookmarksBySha := make(map[string][]string)
+	out, err := r.runJj("bookmark", "list", "-T", "json(self)")
+	if err != nil {
+		return bookmarksBySha, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(out))
+	for decoder.More() {
+		var bookmark Bookmark
+		if err := decoder.Decode(&bookmark); err != nil {
+			return bookmarksBySha, err
+		}
+		if bookmark.Remote != "" {
+			continue
+		}
+		for _, sha := range bookmark.Target {
+			bookmarksBySha[sha] = append(bookmarksBySha[sha], bookmark.Name)
+		}
+	}
+	return bookmarksBySha, nil
+}
+
 func (r *Repository) getChangesets() ([]Changeset, error) {
 	changesets := []Changeset{}
+
+	bookmarksBySha, err := r.getBookmarks()
+	if err != nil {
+		return changesets, err
+	}
+
 	out, err := r.runJj("log", "-r", "ancestors(bookmarks()) ~ ::trunk()", "-G", "-T", "json(self)")
 	if err != nil {
 		return changesets, err
 	}
-	lines := bytes.SplitSeq(out, []byte("\n"))
-	for line := range lines {
-		if len(line) == 0 {
-			continue
-		}
+	decoder := json.NewDecoder(bytes.NewReader(out))
+	for decoder.More() {
 		var changeset Changeset
-		if err := json.Unmarshal(line, &changeset); err != nil {
+		if err := decoder.Decode(&changeset); err != nil {
 			return changesets, err
 		}
+		changeset.Bookmarks = bookmarksBySha[changeset.Sha]
 		changesets = append(changesets, changeset)
 	}
 	return changesets, nil
