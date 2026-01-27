@@ -11,7 +11,6 @@ type Repository struct {
 	root string
 }
 
-// {"commit_id":"79c26b477dbc70ffec6a897457f9bea97c0969c6","parents":["6254a90cead4685d00d556525c3d1b3e0184ccbe"],"change_id":"qyswkmwzqlpvnokvmqplzyyurtmqvmqz","description":"tunnel.handler: ignore 108/success mismatch\n","author":{"name":"Benjamin Pollack","email":"benjamin@ngrok.com","timestamp":"2026-01-13T18:31:23Z"},"committer":{"name":"Benjamin Pollack","email":"benjamin@ngrok.com","timestamp":"2026-01-13T18:32:12Z"}}
 type Changeset struct {
 	Id          string `json:"change_id"` // Jujutsu changeset ID
 	Sha         string `json:"commit_id"` // git commit
@@ -62,7 +61,7 @@ func (r *Repository) getChangesets() ([]Changeset, error) {
 		return changesets, err
 	}
 
-	out, err := r.runJj("log", "-r", "ancestors(bookmarks()) ~ ::trunk()", "-G", "-T", "json(self)")
+	out, err := r.runJj("log", "-r", "mutable() & (ancestors(bookmarks()) ~ ::trunk())", "-G", "-T", "json(self)")
 	if err != nil {
 		return changesets, err
 	}
