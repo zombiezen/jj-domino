@@ -21,20 +21,20 @@ type submitCmd struct {
 
 type doctorCmd struct{}
 
-func (c *submitCmd) Run() error {
+func (c *submitCmd) Run(ctx context.Context) error {
 	var root string
 	if c.Root != nil {
 		root = *c.Root
 	} else {
 		var err error
-		root, err = getCurrentRoot()
+		root, err = getCurrentRoot(ctx)
 		if err != nil {
 			return err
 		}
 	}
 	fmt.Printf("root: %#v\n", root)
 	r := NewRepository(root)
-	changes, err := r.getChangesets()
+	changes, err := r.getChangesets(ctx)
 	if err != nil {
 		return err
 	}
@@ -42,12 +42,12 @@ func (c *submitCmd) Run() error {
 	return nil
 }
 
-func (c *doctorCmd) Run() error {
+func (c *doctorCmd) Run(ctx context.Context) error {
 	client, err := getClient()
 	if err != nil {
 		return err
 	}
-	user, _, err := client.Users.Get(context.Background(), "")
+	user, _, err := client.Users.Get(ctx, "")
 	if err != nil {
 		return err
 	}
