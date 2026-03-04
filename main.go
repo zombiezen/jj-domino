@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"slices"
 
 	"git.sr.ht/~bmp/jj-domino/internal/jujutsu"
 	"github.com/alecthomas/kong"
@@ -23,23 +24,40 @@ type submitCmd struct {
 type doctorCmd struct{}
 
 func (c *submitCmd) Run(ctx context.Context) error {
-	var root string
+	opts := jujutsu.Options{}
 	if c.Root != nil {
-		root = *c.Root
-	} else {
-		var err error
-		root, err = jujutsu.GetCurrentRoot(ctx)
-		if err != nil {
-			return err
-		}
+		opts.Dir = *c.Root
 	}
-	fmt.Printf("root: %#v\n", root)
-	r := jujutsu.NewRepository(root)
-	changes, err := r.GetChangesets(ctx)
+	jj, err := jujutsu.New(opts)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("%#v\n", changes)
+	root, err := jj.WorkspaceRoot(ctx)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("root: %#v\n", root)
+	bookmarks, err := jj.ListBookmarks(ctx)
+	if err != nil {
+		return err
+	}
+	var changes []*jujutsu.Commit
+	err = jj.Log(ctx, "mutable() & (ancestors(bookmarks()) ~ ::trunk())", func(c *jujutsu.Commit) bool {
+		changes = append(changes, c)
+		return true
+	})
+	if err != nil {
+		return err
+	}
+	for _, c := range changes {
+		fmt.Print(c.ChangeID.Short())
+		for _, b := range bookmarks {
+			if b.Remote == "" && slices.ContainsFunc(b.Target, c.ID.Equal) {
+				fmt.Print(" " + b.Name)
+			}
+		}
+		fmt.Printf(" (%v)\n%s\n\n", c.ID, c.Description)
+	}
 	return nil
 }
 

@@ -3,104 +3,140 @@ package jujutsu
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"os"
 	"os/exec"
-	"strings"
+	"path/filepath"
 )
 
-type Repository struct {
-	root string
+// Jujutsu is a context for performing Jujutsu version control operations.
+type Jujutsu struct {
+	exe string
+	env []string
+	dir string
 }
 
-type Changeset struct {
-	Id          string   `json:"change_id"` // Jujutsu changeset ID
-	Sha         string   `json:"commit_id"` // git commit
-	Description string   `json:"description"`
-	Bookmarks   []string `json:"-"` // populated separately
-	Parents     []string `json:"parents"`
+// Options holds the parameters for [New].
+type Options struct {
+	// Dir is the working directory to run the Jujutsu subprocess from.
+	// If empty, uses this process's working directory.
+	Dir string
+
+	// Env specifies the environment of the subprocess.
+	// If Env == nil, then the process's environment will be used.
+	Env []string
+
+	// JJExe is the name of or a path to a Jujutsu executable.
+	// It is treated in the same manner as the argument to exec.LookPath.
+	// An empty string is treated the same as "jj".
+	JJExe string
 }
 
-func (r *Repository) runJj(ctx context.Context, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "jj", args...)
-	cmd.Dir = r.root
-	out, err := cmd.Output()
-	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return nil, fmt.Errorf("jj %s: %w\n%s", args[0], err, exitErr.Stderr)
-		}
-		return nil, err
+// New returns a new Jujutsu context with the given [Options].
+func New(opts Options) (*Jujutsu, error) {
+	jj := &Jujutsu{
+		exe: cmp.Or(opts.JJExe, "jj"),
+		env: opts.Env,
+		dir: opts.Dir,
 	}
-	return out, nil
+	var err error
+	jj.exe, err = exec.LookPath(jj.exe)
+	if err != nil {
+		return nil, fmt.Errorf("init jj: %v", err)
+	}
+	if jj.env == nil {
+		jj.env = os.Environ()
+	}
+	if jj.dir != "" {
+		var err error
+		jj.dir, err = filepath.Abs(jj.dir)
+		if err != nil {
+			return nil, fmt.Errorf("init jj: %v", err)
+		}
+	}
+	return jj, nil
+}
+
+func (jj *Jujutsu) command(ctx context.Context, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, jj.exe, args...)
+	cmd.Dir = jj.dir
+	cmd.Env = jj.env
+	cmd.Stderr = os.Stderr
+	return cmd
 }
 
 type Bookmark struct {
-	Name   string
-	Remote string
-	Target []string
+	Name   string     `json:"name"`
+	Remote string     `json:"remote"`
+	Target []CommitID `json:"target"`
 }
 
-func (r *Repository) GetBookmarks(ctx context.Context) (map[string][]string, error) {
-	out, err := r.runJj(ctx, "bookmark", "list", "-T", "json(self)")
+func (jj *Jujutsu) ListBookmarks(ctx context.Context) ([]*Bookmark, error) {
+	out, err := jj.command(ctx, "bookmark", "list", "--all", "--ignore-working-copy", "--template", "json(self)").Output()
 	if err != nil {
 		return nil, err
 	}
-	bookmarksBySha := make(map[string][]string)
 	decoder := json.NewDecoder(bytes.NewReader(out))
+	var bookmarks []*Bookmark
 	for decoder.More() {
-		var bookmark Bookmark
-		if err := decoder.Decode(&bookmark); err != nil {
+		b := new(Bookmark)
+		if err := decoder.Decode(b); err != nil {
 			return nil, err
 		}
-		if bookmark.Remote != "" {
-			continue
-		}
-		for _, sha := range bookmark.Target {
-			bookmarksBySha[sha] = append(bookmarksBySha[sha], bookmark.Name)
-		}
+		bookmarks = append(bookmarks, b)
 	}
-	return bookmarksBySha, nil
+	return bookmarks, nil
 }
 
-func (r *Repository) GetChangesets(ctx context.Context) ([]Changeset, error) {
-	bookmarksBySha, err := r.GetBookmarks(ctx)
+// Commit represents a snapshot of the repository at a given point in time
+// with some metadata.
+//
+// https://docs.jj-vcs.dev/latest/glossary/#commit
+type Commit struct {
+	ID          CommitID   `json:"commit_id"`
+	ChangeID    ChangeID   `json:"change_id"`
+	Description string     `json:"description"`
+	Parents     []CommitID `json:"parents"`
+}
+
+func (jj *Jujutsu) Log(ctx context.Context, revset string, yield func(*Commit) bool) error {
+	cmd := jj.command(ctx, "log", "--ignore-working-copy", "--no-graph", "--template", "json(self)", "--revisions", revset)
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("jj log: %v", err)
+	}
+	defer stdout.Close()
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("jj log: %v", err)
 	}
 
-	out, err := r.runJj(ctx, "log", "-r", "mutable() & (ancestors(bookmarks()) ~ ::trunk())", "--no-graph", "-T", "json(self)")
-	if err != nil {
-		return nil, err
-	}
-	var changesets []Changeset
-	decoder := json.NewDecoder(bytes.NewReader(out))
+	decoder := json.NewDecoder(stdout)
 	for decoder.More() {
-		var changeset Changeset
-		if err := decoder.Decode(&changeset); err != nil {
-			return nil, err
+		c := new(Commit)
+		if err := decoder.Decode(c); err != nil {
+			stdout.Close()
+			cmd.Wait()
+			return fmt.Errorf("jj log: %v", err)
 		}
-		changeset.Bookmarks = bookmarksBySha[changeset.Sha]
-		changesets = append(changesets, changeset)
+		if !yield(c) {
+			stdout.Close()
+			cmd.Wait()
+			return nil
+		}
 	}
-	return changesets, nil
+	if err := cmd.Wait(); err != nil {
+		return fmt.Errorf("jj log: %v", err)
+	}
+	return nil
 }
 
-func NewRepository(root string) Repository {
-	return Repository{root}
-}
-
-func GetCurrentRoot(ctx context.Context) (string, error) {
-	cmd := exec.CommandContext(ctx, "jj", "root")
-	out, err := cmd.Output()
+func (jj *Jujutsu) WorkspaceRoot(ctx context.Context) (string, error) {
+	out, err := jj.command(ctx, "workspace", "root", "--ignore-working-copy").Output()
 	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return "", fmt.Errorf("jj root: %w\n%s", err, exitErr.Stderr)
-		}
-		return "", err
+		return "", fmt.Errorf("jj workspace root: %v", err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	return string(bytes.TrimSuffix(out, []byte("\n"))), nil
 }
