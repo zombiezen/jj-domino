@@ -33,6 +33,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	jsonv2 "github.com/go-json-experiment/json"
 	"github.com/go-json-experiment/json/jsontext"
@@ -92,6 +93,89 @@ func (jj *Jujutsu) command(ctx context.Context, args ...string) *exec.Cmd {
 	cmd.Env = jj.env
 	cmd.Stderr = os.Stderr
 	return cmd
+}
+
+// GitInitOptions is the set of optional parameters to [*Jujutsu.GitInit].
+type GitInitOptions struct {
+	Destination string
+	Colocate    bool
+}
+
+// GitInit creates a new Git-backed repository.
+func (jj *Jujutsu) GitInit(ctx context.Context, opts GitInitOptions) error {
+	cmd := jj.command(ctx, "git", "init", "--quiet")
+	if opts.Colocate {
+		cmd.Args = append(cmd.Args, "--colocate")
+	} else {
+		cmd.Args = append(cmd.Args, "--no-colocate")
+	}
+	if opts.Destination != "" {
+		cmd.Args = append(cmd.Args, "--", opts.Destination)
+	}
+	if err := runCommand(cmd); err != nil {
+		return fmt.Errorf("jj git init: %v", err)
+	}
+	return nil
+}
+
+// New creates a new change and edits it.
+func (jj *Jujutsu) New(ctx context.Context, parents ...string) error {
+	args := append([]string{"new", "--"}, parents...)
+	cmd := jj.command(ctx, args...)
+	if err := runCommand(cmd); err != nil {
+		return fmt.Errorf("jj new: %v", err)
+	}
+	return nil
+}
+
+// SetBookmarkOptions is the set of optional parameters to [*Jujutsu.SetBookmark].
+type SetBookmarkOptions struct {
+	Revision       string
+	AllowBackwards bool
+}
+
+// SetBookmark creates a new bookmark or updates an existing one by name.
+func (jj *Jujutsu) SetBookmark(ctx context.Context, names []string, opts SetBookmarkOptions) error {
+	if len(names) == 0 {
+		return fmt.Errorf("jj bookmark set: names empty")
+	}
+	cmd := jj.command(ctx, "bookmark", "set", "--ignore-working-copy")
+	if opts.Revision != "" {
+		cmd.Args = append(cmd.Args, "--revision="+opts.Revision)
+	}
+	if opts.AllowBackwards {
+		cmd.Args = append(cmd.Args, "--allow-backwards")
+	}
+	cmd.Args = append(cmd.Args, "--")
+	cmd.Args = append(cmd.Args, names...)
+
+	if err := runCommand(cmd); err != nil {
+		return fmt.Errorf("jj bookmark set: %v", err)
+	}
+	return nil
+}
+
+// DeleteBookmarks deletes bookmarks and propagates the deletion on the next push.
+// If names is empty, then DeleteBookmarks returns nil without doing anything.
+func (jj *Jujutsu) DeleteBookmarks(ctx context.Context, names []string) error {
+	if len(names) == 0 {
+		return nil
+	}
+	args := append([]string{"bookmark", "delete", "--"}, names...)
+	cmd := jj.command(ctx, args...)
+	if err := runCommand(cmd); err != nil {
+		return fmt.Errorf("jj bookmark delete %s: %v", strings.Join(names, " "), err)
+	}
+	return nil
+}
+
+// SetRepositorySetting sets a configuration setting on the repository.
+func (jj *Jujutsu) SetRepositorySetting(ctx context.Context, key, value string) error {
+	cmd := jj.command(ctx, "config", "set", "--ignore-working-copy", "--repo", "--", key, value)
+	if err := runCommand(cmd); err != nil {
+		return fmt.Errorf("jj config set --repo %s %s: %v", key, value, err)
+	}
+	return nil
 }
 
 type Bookmark struct {
@@ -173,4 +257,23 @@ func (jj *Jujutsu) WorkspaceRoot(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("jj workspace root: %v", err)
 	}
 	return string(bytes.TrimSuffix(out, []byte("\n"))), nil
+}
+
+func runCommand(cmd *exec.Cmd) error {
+	stderr := new(bytes.Buffer)
+	cmd.Stderr = stderr
+
+	if err := cmd.Run(); err != nil {
+		if stderr.Len() == 0 {
+			return err
+		}
+		errorMessage := bytes.TrimSuffix(stderr.Bytes(), []byte("\n"))
+		if _, ok := errors.AsType[*exec.ExitError](err); ok {
+			// Omit "exit status 1" in error message.
+			return errors.New(string(errorMessage))
+		}
+		return fmt.Errorf("%v\n\n%s", err, errorMessage)
+	}
+
+	return nil
 }
