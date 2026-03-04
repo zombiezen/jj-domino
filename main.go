@@ -57,6 +57,7 @@ func (c *doctorCmd) Run(ctx context.Context) error {
 
 func main() {
 	ctx := kong.Parse(&cli{}, kong.UsageOnError())
+	ctx.BindTo(context.Background(), (*context.Context)(nil))
 	if err := ctx.Run(); err != nil {
 		log.Fatal(err)
 	}
