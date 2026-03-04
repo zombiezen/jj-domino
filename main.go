@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 
+	"git.sr.ht/~bmp/jj-domino/internal/jujutsu"
 	"github.com/alecthomas/kong"
 )
 
@@ -27,14 +28,14 @@ func (c *submitCmd) Run(ctx context.Context) error {
 		root = *c.Root
 	} else {
 		var err error
-		root, err = getCurrentRoot(ctx)
+		root, err = jujutsu.GetCurrentRoot(ctx)
 		if err != nil {
 			return err
 		}
 	}
 	fmt.Printf("root: %#v\n", root)
-	r := NewRepository(root)
-	changes, err := r.getChangesets(ctx)
+	r := jujutsu.NewRepository(root)
+	changes, err := r.GetChangesets(ctx)
 	if err != nil {
 		return err
 	}

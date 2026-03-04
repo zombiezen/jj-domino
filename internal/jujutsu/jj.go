@@ -1,4 +1,5 @@
-package main
+// Package jujutsu provides a high-level interface for interacting with a [Jujutsu] subprocess.
+package jujutsu
 
 import (
 	"bytes"
@@ -42,7 +43,7 @@ type Bookmark struct {
 	Target []string
 }
 
-func (r *Repository) getBookmarks(ctx context.Context) (map[string][]string, error) {
+func (r *Repository) GetBookmarks(ctx context.Context) (map[string][]string, error) {
 	out, err := r.runJj(ctx, "bookmark", "list", "-T", "json(self)")
 	if err != nil {
 		return nil, err
@@ -64,8 +65,8 @@ func (r *Repository) getBookmarks(ctx context.Context) (map[string][]string, err
 	return bookmarksBySha, nil
 }
 
-func (r *Repository) getChangesets(ctx context.Context) ([]Changeset, error) {
-	bookmarksBySha, err := r.getBookmarks(ctx)
+func (r *Repository) GetChangesets(ctx context.Context) ([]Changeset, error) {
+	bookmarksBySha, err := r.GetBookmarks(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +92,7 @@ func NewRepository(root string) Repository {
 	return Repository{root}
 }
 
-func getCurrentRoot(ctx context.Context) (string, error) {
+func GetCurrentRoot(ctx context.Context) (string, error) {
 	cmd := exec.CommandContext(ctx, "jj", "root")
 	out, err := cmd.Output()
 	if err != nil {
