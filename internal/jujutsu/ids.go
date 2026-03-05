@@ -6,6 +6,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"slices"
+
+	jsonv2 "github.com/go-json-experiment/json"
+	"github.com/go-json-experiment/json/jsontext"
 )
 
 // ChangeID holds a [change ID].
@@ -18,11 +21,13 @@ var _ interface {
 	encoding.TextAppender
 	encoding.BinaryMarshaler
 	encoding.BinaryAppender
+	jsonv2.MarshalerTo
 } = ChangeID(nil)
 
 var _ interface {
 	encoding.TextUnmarshaler
 	encoding.BinaryUnmarshaler
+	jsonv2.UnmarshalerFrom
 } = (*ChangeID)(nil)
 
 // String returns the change ID in lowercase "reverse" hex.
@@ -59,11 +64,48 @@ func (id ChangeID) AppendText(dst []byte) ([]byte, error) {
 // "Reverse" hexadecimal uses the letters z-k to represent 0-9a-f.
 func (id *ChangeID) UnmarshalText(text []byte) error {
 	n := hex.DecodedLen(len(text))
-	newBuffer := slices.Grow(*id, n)[:n]
+	newBuffer := slices.Grow((*id)[:0], n)[:n]
 	if _, err := decodeReverseHex(newBuffer, text); err != nil {
 		return fmt.Errorf("unmarshal change ID: %v", err)
 	}
 	*id = newBuffer
+	return nil
+}
+
+// MarshalJSONTo implements [jsonv2.MarshalerTo]
+// by writing a string with the lowercase "reverse" hexadecimal encoding of the ID
+// or null if the id is empty.
+// "Reverse" hexadecimal uses the letters z-k to represent 0-9a-f.
+func (id ChangeID) MarshalJSONTo(enc *jsontext.Encoder) error {
+	if len(id) == 0 {
+		return enc.WriteToken(jsontext.Null)
+	}
+	return enc.WriteToken(jsontext.String(id.String()))
+}
+
+// UnmarshalJSONFrom implements [jsonv2.UnmarshalerFrom]
+// by decoding a "reverse" hexadecimal encoding of the ID.
+// "Reverse" hexadecimal uses the letters z-k to represent 0-9a-f.
+// UnmarshalJSONFrom will also set id to nil from a null.
+func (id *ChangeID) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	switch dec.PeekKind() {
+	case jsontext.KindNull:
+		*id = nil
+	case jsontext.KindString:
+		tok, err := dec.ReadToken()
+		if err != nil {
+			return err
+		}
+		text := tok.String()
+		n := hex.DecodedLen(len(text))
+		newBuffer := slices.Grow((*id)[:0], n)[:n]
+		if _, err := decodeReverseHex(newBuffer, text); err != nil {
+			return fmt.Errorf("unmarshal change ID: %v", err)
+		}
+		*id = newBuffer
+	default:
+		return fmt.Errorf("unmarshal change ID: must be a string or null")
+	}
 	return nil
 }
 
@@ -97,11 +139,13 @@ var _ interface {
 	encoding.TextAppender
 	encoding.BinaryMarshaler
 	encoding.BinaryAppender
+	jsonv2.MarshalerTo
 } = CommitID(nil)
 
 var _ interface {
 	encoding.TextUnmarshaler
 	encoding.BinaryUnmarshaler
+	jsonv2.UnmarshalerFrom
 } = (*CommitID)(nil)
 
 // String returns the commit ID in lowercase hex.
@@ -130,11 +174,46 @@ func (id CommitID) AppendText(dst []byte) ([]byte, error) {
 // by decoding a hexadecimal string.
 func (id *CommitID) UnmarshalText(text []byte) error {
 	n := hex.DecodedLen(len(text))
-	newBuffer := slices.Grow(*id, n)[:n]
+	newBuffer := slices.Grow((*id)[:0], n)[:n]
 	if _, err := hex.Decode(newBuffer, text); err != nil {
 		return fmt.Errorf("unmarshal commit ID: %v", err)
 	}
 	*id = newBuffer
+	return nil
+}
+
+// MarshalJSONTo implements [jsonv2.MarshalerTo]
+// by writing a string with the lowercase hexadecimal encoding of the ID
+// or null if the id is empty.
+func (id CommitID) MarshalJSONTo(enc *jsontext.Encoder) error {
+	if len(id) == 0 {
+		return enc.WriteToken(jsontext.Null)
+	}
+	return enc.WriteToken(jsontext.String(id.String()))
+}
+
+// UnmarshalJSONFrom implements [jsonv2.UnmarshalerFrom]
+// by decoding a hexadecimal string.
+// UnmarshalJSONFrom will also set id to nil from a null.
+func (id *CommitID) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	switch dec.PeekKind() {
+	case jsontext.KindNull:
+		*id = nil
+	case jsontext.KindString:
+		tok, err := dec.ReadToken()
+		if err != nil {
+			return err
+		}
+		text := tok.String()
+		n := hex.DecodedLen(len(text))
+		newBuffer := slices.Grow((*id)[:0], n)[:n]
+		if _, err := hex.Decode(newBuffer, []byte(text)); err != nil {
+			return fmt.Errorf("unmarshal commit ID: %v", err)
+		}
+		*id = newBuffer
+	default:
+		return fmt.Errorf("unmarshal commit ID: must be a string or null")
+	}
 	return nil
 }
 

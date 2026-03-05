@@ -5,11 +5,15 @@ import (
 	"bytes"
 	"cmp"
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	jsonv2 "github.com/go-json-experiment/json"
+	"github.com/go-json-experiment/json/jsontext"
 )
 
 // Jujutsu is a context for performing Jujutsu version control operations.
@@ -77,16 +81,19 @@ type Bookmark struct {
 func (jj *Jujutsu) ListBookmarks(ctx context.Context) ([]*Bookmark, error) {
 	out, err := jj.command(ctx, "bookmark", "list", "--all", "--ignore-working-copy", "--template", "json(self)").Output()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("jj bookmark list: %v", err)
 	}
-	decoder := json.NewDecoder(bytes.NewReader(out))
+	decoder := jsontext.NewDecoder(bytes.NewReader(out))
 	var bookmarks []*Bookmark
-	for decoder.More() {
+	for decoder.PeekKind() != jsontext.KindInvalid {
 		b := new(Bookmark)
-		if err := decoder.Decode(b); err != nil {
+		if err := jsonv2.UnmarshalDecode(decoder, b); err != nil {
 			return nil, err
 		}
 		bookmarks = append(bookmarks, b)
+	}
+	if _, err := decoder.ReadToken(); err != nil && !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("jj bookmark list: %v", err)
 	}
 	return bookmarks, nil
 }
@@ -113,10 +120,10 @@ func (jj *Jujutsu) Log(ctx context.Context, revset string, yield func(*Commit) b
 		return fmt.Errorf("jj log: %v", err)
 	}
 
-	decoder := json.NewDecoder(stdout)
-	for decoder.More() {
+	decoder := jsontext.NewDecoder(stdout)
+	for decoder.PeekKind() != jsontext.KindInvalid {
 		c := new(Commit)
-		if err := decoder.Decode(c); err != nil {
+		if err := jsonv2.UnmarshalDecode(decoder, c); err != nil {
 			stdout.Close()
 			cmd.Wait()
 			return fmt.Errorf("jj log: %v", err)
@@ -126,6 +133,11 @@ func (jj *Jujutsu) Log(ctx context.Context, revset string, yield func(*Commit) b
 			cmd.Wait()
 			return nil
 		}
+	}
+	if _, err := decoder.ReadToken(); err != nil && !errors.Is(err, io.EOF) {
+		stdout.Close()
+		cmd.Wait()
+		return fmt.Errorf("jj log: %v", err)
 	}
 	if err := cmd.Wait(); err != nil {
 		return fmt.Errorf("jj log: %v", err)
