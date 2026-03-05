@@ -73,9 +73,9 @@ func (jj *Jujutsu) command(ctx context.Context, args ...string) *exec.Cmd {
 }
 
 type Bookmark struct {
-	Name   string     `json:"name"`
-	Remote string     `json:"remote"`
-	Target []CommitID `json:"target"`
+	Name        string          `json:"name"`
+	Remote      string          `json:"remote"`
+	TargetMerge Merge[CommitID] `json:"target"`
 }
 
 func (jj *Jujutsu) ListBookmarks(ctx context.Context) ([]*Bookmark, error) {

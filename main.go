@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"slices"
 
 	"git.sr.ht/~bmp/jj-domino/internal/jujutsu"
 	"github.com/alecthomas/kong"
@@ -52,7 +51,7 @@ func (c *submitCmd) Run(ctx context.Context) error {
 	for _, c := range changes {
 		fmt.Print(c.ChangeID.Short())
 		for _, b := range bookmarks {
-			if b.Remote == "" && slices.ContainsFunc(b.Target, c.ID.Equal) {
+			if target, ok := b.TargetMerge.Resolved(); b.Remote == "" && ok && target.Equal(c.ID) {
 				fmt.Print(" " + b.Name)
 			}
 		}

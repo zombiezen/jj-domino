@@ -30,6 +30,11 @@ var _ interface {
 	jsonv2.UnmarshalerFrom
 } = (*ChangeID)(nil)
 
+// IsZero reports whether the length of id is zero.
+func (id ChangeID) IsZero() bool {
+	return len(id) == 0
+}
+
 // String returns the change ID in lowercase "reverse" hex.
 func (id ChangeID) String() string {
 	return string(appendReverseHex(nil, id))
@@ -147,6 +152,11 @@ var _ interface {
 	encoding.BinaryUnmarshaler
 	jsonv2.UnmarshalerFrom
 } = (*CommitID)(nil)
+
+// IsZero reports whether the length of id is zero.
+func (id CommitID) IsZero() bool {
+	return len(id) == 0
+}
 
 // String returns the commit ID in lowercase hex.
 func (id CommitID) String() string {
