@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"log"
 
-	"git.sr.ht/~bmp/jj-domino/internal/jujutsu"
 	"github.com/alecthomas/kong"
+	"zombiezen.com/go/jj-domino/internal/jujutsu"
 )
 
 type cli struct {

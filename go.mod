@@ -1,4 +1,4 @@
-module git.sr.ht/~bmp/jj-domino
+module zombiezen.com/go/jj-domino
 
 go 1.26.0
 
