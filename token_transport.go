@@ -22,37 +22,32 @@
 
 package main
 
-import (
-	"errors"
-	"os"
-	"os/exec"
-	"strings"
+import "net/http"
 
-	"github.com/google/go-github/v81/github"
-)
-
-func githubToken() (string, error) {
-	// Prefer `gh`, fall back to env vars if not available
-	cmd := exec.Command("gh", "auth", "status")
-	if err := cmd.Run(); err == nil {
-		cmd = exec.Command("gh", "auth", "token")
-		var raw []byte
-		if raw, err = cmd.Output(); err == nil {
-			return strings.TrimSpace(string(raw)), nil
-		}
-	}
-	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-		return token, nil
-	} else if token := os.Getenv("GH_TOKEN"); token != "" {
-		return token, nil
-	}
-	return "", errors.New("no token found")
+// tokenTransport is an [http.RoundTripper]
+// that adds an Authorization header to requests to a particular host.
+type tokenTransport struct {
+	host  string
+	token string
+	rt    http.RoundTripper
 }
 
-func getClient() (*github.Client, error) {
-	token, err := githubToken()
-	if err != nil {
-		return nil, err
+// RoundTrip implements [http.RoundTripper]
+// by adding an Authorization header if applicable.
+func (tt tokenTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.Host == tt.host && (req.Host == "" || req.Host == tt.host) {
+		req = req.Clone(req.Context())
+		req.Header.Set("Authorization", "Bearer "+tt.token)
 	}
-	return github.NewClient(nil).WithAuthToken(token), nil
+	return tt.rt.RoundTrip(req)
+}
+
+// CloseIdleConnections calls tt.rt.CloseIdleConnections(), if present.
+func (tt tokenTransport) CloseIdleConnections() {
+	cic, ok := tt.rt.(interface {
+		CloseIdleConnections()
+	})
+	if ok {
+		cic.CloseIdleConnections()
+	}
 }

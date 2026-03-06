@@ -27,9 +27,14 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
+	"os"
+	"os/exec"
 	"slices"
+	"strings"
 
 	"github.com/alecthomas/kong"
+	"github.com/shurcooL/githubv4"
 	"zombiezen.com/go/jj-domino/internal/jujutsu"
 )
 
@@ -161,16 +166,54 @@ func stackForBookmark(ctx context.Context, jj *jujutsu.Jujutsu, bookmark string)
 }
 
 func (c *doctorCmd) Run(ctx context.Context) error {
-	client, err := getClient()
+	token, err := gitHubToken(ctx)
 	if err != nil {
 		return err
 	}
-	user, _, err := client.Users.Get(ctx, "")
-	if err != nil {
+	httpClient := newGitHubHTTPClient(token)
+	defer httpClient.CloseIdleConnections()
+	client := githubv4.NewClient(httpClient)
+
+	var query struct {
+		Viewer struct {
+			Login githubv4.String
+		}
+	}
+	if err := client.Query(ctx, &query, nil); err != nil {
 		return err
 	}
-	fmt.Printf("Authenticated as: %s\n", user.GetLogin())
+
+	fmt.Printf("Authenticated as: %s\n", query.Viewer.Login)
 	return nil
+}
+
+func newGitHubHTTPClient(token string) *http.Client {
+	return &http.Client{
+		Transport: tokenTransport{
+			host:  "api.github.com",
+			token: token,
+			rt:    http.DefaultTransport,
+		},
+	}
+}
+
+func gitHubToken(ctx context.Context) (string, error) {
+	// Prefer `gh`, fall back to env vars if not available
+	cmd := exec.CommandContext(ctx, "gh", "auth", "status")
+	if err := cmd.Run(); err == nil {
+		cmd = exec.CommandContext(ctx, "gh", "auth", "token")
+		var raw []byte
+		if raw, err = cmd.Output(); err == nil {
+			return strings.TrimSpace(string(raw)), nil
+		}
+	}
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		return token, nil
+	}
+	if token := os.Getenv("GH_TOKEN"); token != "" {
+		return token, nil
+	}
+	return "", errors.New("GITHUB_TOKEN not set")
 }
 
 func main() {

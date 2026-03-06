@@ -6,7 +6,10 @@ require (
 	github.com/alecthomas/kong v1.13.0
 	github.com/go-json-experiment/json v0.0.0-20260214004413-d219187c3433
 	github.com/google/go-cmp v0.7.0
-	github.com/google/go-github/v81 v81.0.0
+	github.com/shurcooL/githubv4 v0.0.0-20260209031235-2402fdf4a9ed
 )
 
-require github.com/google/go-querystring v1.1.0 // indirect
+require (
+	github.com/shurcooL/graphql v0.0.0-20240915155400-7ee5256398cf // indirect
+	golang.org/x/oauth2 v0.35.0 // indirect
+)
