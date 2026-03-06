@@ -24,23 +24,91 @@ package jujutsu
 
 import "testing"
 
-func TestQuote(t *testing.T) {
-	tests := []struct {
-		s    string
-		want string
-	}{
-		{"", `""`},
-		{"foo", `"foo"`},
-		{"foo bar", `"foo bar"`},
-		{"foo\nbar", `"foo\nbar"`},
-		{"foo\\bar", `"foo\\bar"`},
-		{"foo\\bar", `"foo\\bar"`},
-		{"foo\x00bar", `"foo\x00bar"`},
-	}
+var quoteTests = []struct {
+	s    string
+	want string
+}{
+	{"", `""`},
+	{"foo", `"foo"`},
+	{"foo bar", `"foo bar"`},
+	{"foo\nbar", `"foo\nbar"`},
+	{"foo\\bar", `"foo\\bar"`},
+	{"foo\\bar", `"foo\\bar"`},
+	{"foo\x00bar", `"foo\x00bar"`},
+}
 
-	for _, test := range tests {
+func TestQuote(t *testing.T) {
+	for _, test := range quoteTests {
 		if got := Quote(test.s); got != test.want {
 			t.Errorf("Quote(%q) = %q; want %q", test.s, got, test.want)
 		}
 	}
+}
+
+var unquoteTests = []struct {
+	symbol string
+	want   string
+	err    bool
+}{
+	{symbol: "", err: true},
+	{symbol: "0", want: "0"},
+	{symbol: `foo_bar/baz`, want: "foo_bar/baz"},
+	{symbol: `*/foo/**`, want: "*/foo/**"},
+	{symbol: `foo.bar-v1+7`, want: "foo.bar-v1+7"},
+	{symbol: `foo.bar-v1+7-`, err: true},
+	{symbol: `foo--bar`, want: "foo--bar"},
+	{symbol: `foo----bar`, want: "foo----bar"},
+	{symbol: `.foo`, err: true},
+	{symbol: `foo.`, err: true},
+	{symbol: `foo.+bar`, err: true},
+	{symbol: `foo++bar`, err: true},
+	{symbol: `foo+-bar`, err: true},
+	{symbol: `柔術+jj`, want: "柔術+jj"},
+	{symbol: `"\t\r\n\"\\\0\e"`, want: "\t\r\n\"\\\x00\x1b"},
+	{symbol: `"\y"`, err: true},
+	{symbol: `''`, want: ""},
+	{symbol: `'a\n'`, want: `a\n`},
+	{symbol: `'"'`, want: `"`},
+	{symbol: `""`, want: ""},
+	{symbol: `"\x61\x65\x69\x6f\x75"`, want: "aeiou"},
+	{symbol: `"\xe0\xe8\xec\xf0\xf9"`, want: "àèìðù"},
+	{symbol: `"\x"`, err: true},
+	{symbol: `"\xf"`, err: true},
+	{symbol: `"\xgg"`, err: true},
+}
+
+func TestUnquote(t *testing.T) {
+	for _, test := range quoteTests {
+		if got, err := Unquote(test.want); got != test.s || err != nil {
+			t.Errorf("Unquote(%q) = %q, %v; want %q, <nil>", test.want, got, err, test.s)
+		}
+	}
+	for _, test := range unquoteTests {
+		if got, err := Unquote(test.symbol); !test.err && (got != test.want || err != nil) {
+			t.Errorf("Unquote(%q) = %q, %v; want %q, <nil>", test.symbol, got, err, test.want)
+		} else if test.err && (got != test.want || err == nil) {
+			t.Errorf("Unquote(%q) = %q, %v; want %q, <error>", test.symbol, got, err, test.want)
+		}
+	}
+}
+
+func FuzzUnquote(f *testing.F) {
+	for _, test := range quoteTests {
+		f.Add(test.want)
+	}
+	for _, test := range unquoteTests {
+		f.Add(test.symbol)
+	}
+
+	f.Fuzz(func(t *testing.T, s string) {
+		parsed1, err := Unquote(s)
+		if err != nil {
+			t.Skip(err)
+		}
+		quoted := Quote(parsed1)
+		parsed2, err := Unquote(quoted)
+		if parsed2 != parsed1 || err != nil {
+			t.Errorf("Unquote(%q) = %q, %v; want %q, <nil>", quoted, parsed2, err, parsed1)
+		}
+	})
 }
