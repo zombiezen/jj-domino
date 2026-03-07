@@ -49,9 +49,10 @@ type cli struct {
 }
 
 type submitCmd struct {
-	Draft    bool   `kong:"short=d,help=Mark base pull request as draft"`
-	Bookmark string `kong:"short=b,help=Bookmark to send,placeholder=NAME"`
-	DryRun   bool   `kong:"short=n,help=Don\\'t send to GitHub"`
+	Bookmark  string   `kong:"short=b,help=Bookmark to send,placeholder=NAME,xor=revisions"`
+	Revisions []string `kong:"short=r,sep=none,help=Push stacks pointing to these commits (can be repeated),placeholder=REVSETS,xor=revisions"`
+	Draft     bool     `kong:"short=d,help=Mark base pull request as draft"`
+	DryRun    bool     `kong:"short=n,help=Don\\'t send to GitHub"`
 }
 
 func (c *submitCmd) Run(ctx context.Context, k *kong.Kong) error {
@@ -67,7 +68,39 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong) error {
 		return err
 	}
 
-	stack, err := stackForBookmark(ctx, jj, bookmarks, c.Bookmark)
+	headBookmark := c.Bookmark
+	if headBookmark == "" {
+		revset := "(trunk()..@)"
+		if len(c.Revisions) > 0 {
+			revset = joinRevsets(c.Revisions)
+		}
+		revset = "heads(bookmarks() & " + revset + ")"
+		var head *jujutsu.Commit
+		multiple := false
+		err := jj.Log(ctx, revset, func(c *jujutsu.Commit) bool {
+			if head != nil {
+				multiple = true
+				return false
+			}
+			head = c
+			return true
+		})
+		if err != nil {
+			return fmt.Errorf("find stack head: %v", err)
+		}
+		if multiple {
+			return fmt.Errorf("find stack head: multiple found")
+		}
+		if head == nil {
+			return fmt.Errorf("find stack head: no bookmarks found")
+		}
+		headBookmark, err = nameForCommit(bookmarks, head.ID)
+		if err != nil {
+			return fmt.Errorf("find stack head: %v", err)
+		}
+	}
+
+	stack, err := stackForBookmark(ctx, jj, bookmarks, headBookmark)
 	if err != nil {
 		return err
 	}
@@ -449,20 +482,13 @@ func stackForBookmark(ctx context.Context, jj *jujutsu.Jujutsu, bookmarks []*juj
 				// Trunk or trunk ancestor.
 				continue
 			}
-			var names []string
-			for _, b := range bookmarks {
-				if target, ok := b.TargetMerge.Resolved(); b.Remote == "" && ok && target.Equal(id) {
-					names = append(names, b.Name)
-				}
-			}
-			switch {
-			case len(names) == 1:
+			if name, err := nameForCommit(bookmarks, id); err != nil && !isNoBookmarksError(err) {
+				resultError = errors.Join(resultError, err)
+			} else if err == nil {
 				stack = append(stack, localCommitRef{
-					name:   names[0],
+					name:   name,
 					commit: c,
 				})
-			case len(names) > 1:
-				resultError = errors.Join(resultError, fmt.Errorf("commit %v has multiple bookmarks", id))
 			}
 			next = append(next, c.Parents...)
 		}
@@ -474,6 +500,41 @@ func stackForBookmark(ctx context.Context, jj *jujutsu.Jujutsu, bookmarks []*juj
 		resultError = fmt.Errorf("compute stack for %q: %w", bookmark, resultError)
 	}
 	return stack, resultError
+}
+
+// nameForCommit finds a single local bookmark name for the given commit ID
+// or returns an error if the commit does not resolve to exactly one bookmark.
+func nameForCommit(bookmarks []*jujutsu.Bookmark, id jujutsu.CommitID) (string, error) {
+	var names []string
+	for _, b := range bookmarks {
+		if target, ok := b.TargetMerge.Resolved(); b.Remote == "" && ok && target.Equal(id) {
+			names = append(names, b.Name)
+		}
+	}
+	switch len(names) {
+	case 0:
+		return "", noBookmarksError{id: id}
+	case 1:
+		return names[0], nil
+	default:
+		return "", fmt.Errorf("commit %v has multiple bookmarks (%s)", id, strings.Join(names, "|"))
+	}
+}
+
+// noBookmarksError is returned if [nameForCommit] did not find any matching bookmarks.
+type noBookmarksError struct {
+	id jujutsu.CommitID
+}
+
+// isNoBookmarksError reports whether err is or wraps a [noBookmarksError].
+func isNoBookmarksError(err error) bool {
+	_, ok := errors.AsType[noBookmarksError](err)
+	return ok
+}
+
+// Error implements [error].
+func (err noBookmarksError) Error() string {
+	return fmt.Sprintf("commit %v has no bookmarks", err.id)
 }
 
 type doctorCmd struct{}
@@ -548,6 +609,23 @@ func prNumberPlaceholder(width int) string {
 	for range width {
 		sb.WriteByte('X')
 	}
+	return sb.String()
+}
+
+// joinRevsets returns a revset that represents a union of the given revsets.
+func joinRevsets(revsets []string) string {
+	if len(revsets) == 0 {
+		return "none()"
+	}
+
+	sb := new(strings.Builder)
+	sb.WriteString("(")
+	sb.WriteString(revsets[0])
+	for _, r := range revsets[1:] {
+		sb.WriteString(")|(")
+		sb.WriteString(r)
+	}
+	sb.WriteString(")")
 	return sb.String()
 }
 
