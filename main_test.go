@@ -223,6 +223,98 @@ func findJJExecutable(tb testing.TB) string {
 	return exe
 }
 
+func TestWriteStackFooter(t *testing.T) {
+	tests := []struct {
+		name  string
+		stack []*plannedPullRequest
+		want  []string
+	}{
+		{
+			name: "Single",
+			stack: []*plannedPullRequest{
+				{
+					pullRequest: pullRequest{
+						Number: 123,
+					},
+				},
+			},
+			want: []string{
+				"",
+			},
+		},
+		{
+			name: "TwoStack",
+			stack: []*plannedPullRequest{
+				{
+					pullRequest: pullRequest{
+						Number: 123,
+					},
+				},
+				{
+					pullRequest: pullRequest{
+						Number: 456,
+					},
+				},
+			},
+			want: []string{
+				stackFooterPreamble +
+					" 1. *→ this pull request ←*\n" +
+					" 2. #456\n",
+				stackFooterPreamble +
+					" 1. #123\n" +
+					" 2. *→ this pull request ←*\n",
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			for i, want := range test.want {
+				sb := new(strings.Builder)
+				writeStackFooter(sb, test.stack, i)
+				got := sb.String()
+				if diff := cmp.Diff(want, got); diff != "" {
+					t.Errorf("footer for stack[%d] (-want +got):\n%s", i, diff)
+				}
+			}
+		})
+	}
+}
+
+func TestTrimStackFooter(t *testing.T) {
+	tests := []struct {
+		s    string
+		want string
+	}{
+		{"", ""},
+		{"Hello, World!", "Hello, World!"},
+		{"foo\nbar", "foo\nbar"},
+		{
+			"I can mention " + stackFooterMarker + " in the middle of a line.",
+			"I can mention " + stackFooterMarker + " in the middle of a line.",
+		},
+		{
+			"foo\n" + stackFooterMarker + "\nbar",
+			"foo\n",
+		},
+		{
+			"foo\r\n" + stackFooterMarker + "\r\nbar",
+			"foo\r\n",
+		},
+		{
+			"foo\n  " + stackFooterMarker + " \nbar",
+			"foo\n",
+		},
+	}
+
+	for _, test := range tests {
+		got := trimStackFooter(test.s)
+		if diff := cmp.Diff(test.want, got); diff != "" {
+			t.Errorf("trimStackFooter(%q) (-want +got:)\n%s", test.s, diff)
+		}
+	}
+}
+
 func TestFormatPRNumber(t *testing.T) {
 	tests := []struct {
 		n     githubv4.Int
