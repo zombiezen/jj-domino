@@ -247,7 +247,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong) error {
 	// (and base ref names).
 	for i, pr := range plan {
 		bodyBuilder := new(strings.Builder)
-		bodyBuilder.WriteString(string(pr.Body))
+		bodyBuilder.WriteString(strings.TrimRight(string(pr.Body), "\n"))
 		writeStackFooter(bodyBuilder, plan, i)
 		pr.Body = githubv4.String(bodyBuilder.String())
 
@@ -351,8 +351,8 @@ func (pr *plannedPullRequest) writeLogLine(sb *strings.Builder, prNumberWidth in
 const (
 	stackFooterMarker   = "<!-- jj-domino -->"
 	stackFooterPreamble = "" +
-		stackFooterMarker + "\n\n" +
-		"<!-- Do not remove the comment above! Everything in this section will be rewritten by jj-domino. -->\n\n" +
+		"\n\n" + stackFooterMarker + "\n" +
+		"<!-- Do not remove this comment! Everything in this section will be rewritten by jj-domino. -->\n\n" +
 		"## Related Pull Requests\n\n" +
 		"This pull request is part of a stack managed by [jj-domino](https://github.com/zombiezen/jj-domino):\n\n"
 )
