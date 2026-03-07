@@ -69,6 +69,7 @@ type pullRequest struct {
 	Title   githubv4.String
 	IsDraft githubv4.Boolean
 	Body    githubv4.String
+	URL     githubv4.URI
 
 	BaseRefName    githubv4.String
 	HeadRepository *gitHubRepository
@@ -188,6 +189,7 @@ func createPullRequest(ctx context.Context, client *githubv4.Client, baseRepo *g
 			PullRequest struct {
 				ID     githubv4.ID
 				Number githubv4.Int
+				URL    githubv4.URI
 			}
 		} `graphql:"createPullRequest(input: $input)"`
 	}
@@ -212,6 +214,7 @@ func createPullRequest(ctx context.Context, client *githubv4.Client, baseRepo *g
 
 	pr.ID = mutation.CreatePullRequest.PullRequest.ID
 	pr.Number = mutation.CreatePullRequest.PullRequest.Number
+	pr.URL = mutation.CreatePullRequest.PullRequest.URL
 	return nil
 }
 
