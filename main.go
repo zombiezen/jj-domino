@@ -181,8 +181,7 @@ func (c *submitCmd) Run(ctx context.Context) error {
 			pr.Number = existingPR.Number
 			pr.Title = existingPR.Title
 			pr.HeadRepository = existingPR.HeadRepository
-			// TODO(#10): Modify body in place with footer.
-			pr.Body = existingPR.Body
+			pr.Body = githubv4.String(trimStackFooter(string(existingPR.Body)))
 		}
 	}
 	if planError != nil {
@@ -208,6 +207,9 @@ func (c *submitCmd) Run(ctx context.Context) error {
 			}
 			sb.WriteString(": ")
 			pr.writeLogLine(sb)
+			if pr.ID == nil {
+				sb.WriteString(" (new)")
+			}
 			sb.WriteString("\n")
 		}
 		os.Stdout.WriteString(sb.String())
@@ -223,16 +225,18 @@ func (c *submitCmd) Run(ctx context.Context) error {
 			}
 		}
 	}), defaultPRNumberWidth)
-	for _, pr := range plan {
-		isNew := pr.ID == nil
-		if isNew {
-			if err := createPullRequest(ctx, gitHubClient, baseRepo, &pr.pullRequest); err != nil {
-				return err
-			}
-		} else {
-			if err := updatePullRequest(ctx, gitHubClient, baseRepoPath, &pr.pullRequest); err != nil {
-				return err
-			}
+
+	// Create all the new pull requests first so we have the numbers.
+	// We need the pull request numbers/URLs for the stack footer.
+	isNew := make([]bool, len(plan))
+	for i, pr := range plan {
+		isNew[i] = pr.ID == nil
+		if !isNew[i] {
+			continue
+		}
+
+		if err := createPullRequest(ctx, gitHubClient, baseRepo, &pr.pullRequest); err != nil {
+			return err
 		}
 		prNumberWidth = max(prNumberWidth, maxIntWidth(func(yield func(githubv4.Int) bool) {
 			yield(pr.Number)
@@ -241,11 +245,30 @@ func (c *submitCmd) Run(ctx context.Context) error {
 		sb.WriteString(formatPRNumber(pr.Number, prNumberWidth))
 		sb.WriteString(": ")
 		pr.writeLogLine(sb)
-		if isNew {
-			sb.WriteString(" (new)")
-		}
+		sb.WriteString(" (new)")
 		sb.WriteString("\n")
 		os.Stdout.WriteString(sb.String())
+	}
+
+	// Now go through and update all the pull requests in the stack with the footer
+	// (and base ref names).
+	for i, pr := range plan {
+		bodyBuilder := new(strings.Builder)
+		bodyBuilder.WriteString(string(pr.Body))
+		writeStackFooter(bodyBuilder, plan, i)
+		pr.Body = githubv4.String(bodyBuilder.String())
+
+		if err := updatePullRequest(ctx, gitHubClient, baseRepoPath, &pr.pullRequest); err != nil {
+			return err
+		}
+		if !isNew[i] {
+			sb := new(strings.Builder)
+			sb.WriteString(formatPRNumber(pr.Number, prNumberWidth))
+			sb.WriteString(": ")
+			pr.writeLogLine(sb)
+			sb.WriteString("\n")
+			os.Stdout.WriteString(sb.String())
+		}
 	}
 
 	return nil
@@ -306,6 +329,54 @@ func (pr *plannedPullRequest) writeLogLine(sb *strings.Builder) {
 		sb.WriteString(string(pr.HeadRefName))
 	}
 	sb.WriteString("]")
+}
+
+const (
+	stackFooterMarker   = "<!-- jj-domino -->"
+	stackFooterPreamble = "" +
+		stackFooterMarker + "\n\n" +
+		"<!-- Do not remove the comment above! Everything in this section will be rewritten by jj-domino. -->\n\n" +
+		"## Related Pull Requests\n\n" +
+		"This pull request is part of a stack managed by [jj-domino](https://github.com/zombiezen/jj-domino):\n\n"
+)
+
+// writeStackFooter writes a Markdown blurb to sb
+// intended for the body of stack[i]
+// with links to the other pull requests in the stack.
+func writeStackFooter(sb *strings.Builder, stack []*plannedPullRequest, i int) {
+	if len(stack) <= 1 {
+		return
+	}
+
+	sb.WriteString(stackFooterPreamble)
+	for j, pr := range stack {
+		if j == i {
+			fmt.Fprintf(sb, "% 2d. *→ this pull request ←*\n", j+1)
+		} else {
+			fmt.Fprintf(sb, "% 2d. #%d\n", j+1, pr.Number)
+		}
+	}
+}
+
+// trimStackFooter removes a blurb previously written by [writeStackFooter] from a string
+// if present.
+func trimStackFooter(s string) string {
+	for lineStart := 0; lineStart < len(s); {
+		var lineEnd int
+		if i := strings.IndexByte(s[lineStart:], '\n'); i < 0 {
+			lineEnd = len(s)
+		} else {
+			lineEnd = lineStart + i + 1
+		}
+		line := s[lineStart:lineEnd]
+
+		if strings.TrimSpace(line) == stackFooterMarker {
+			return s[:lineStart]
+		}
+
+		lineStart = lineEnd
+	}
+	return s
 }
 
 type localCommitRef struct {
