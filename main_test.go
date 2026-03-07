@@ -34,8 +34,12 @@ func TestStackForBookmark(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		bookmarks, err := jj.ListBookmarks(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
 
-		got, err := stackForBookmark(ctx, jj, "foo")
+		got, err := stackForBookmark(ctx, jj, bookmarks, "foo")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -66,8 +70,12 @@ func TestStackForBookmark(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		bookmarks, err := jj.ListBookmarks(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
 
-		got, err := stackForBookmark(ctx, jj, "bar")
+		got, err := stackForBookmark(ctx, jj, bookmarks, "bar")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -104,8 +112,12 @@ func TestStackForBookmark(t *testing.T) {
 		if err := jj.DeleteBookmarks(ctx, []string{"b", "c", "d"}); err != nil {
 			t.Fatal(err)
 		}
+		bookmarks, err := jj.ListBookmarks(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
 
-		got, err := stackForBookmark(ctx, jj, "a")
+		got, err := stackForBookmark(ctx, jj, bookmarks, "a")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -143,8 +155,12 @@ func TestStackForBookmark(t *testing.T) {
 		if err := jj.DeleteBookmarks(ctx, []string{"c", "d"}); err != nil {
 			t.Fatal(err)
 		}
+		bookmarks, err := jj.ListBookmarks(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
 
-		got, err := stackForBookmark(ctx, jj, "a")
+		got, err := stackForBookmark(ctx, jj, bookmarks, "a")
 		if err == nil {
 			names := make([]string, 0, len(got))
 			for _, pr := range got {

@@ -169,6 +169,28 @@ func (jj *Jujutsu) DeleteBookmarks(ctx context.Context, names []string) error {
 	return nil
 }
 
+// ReadSettings reads all the active Jujutsu configuration settings.
+func (jj *Jujutsu) ReadSettings(ctx context.Context) (map[string]jsontext.Value, error) {
+	const template = `json(name) ++ ":" ++ json(value) ++ ","`
+	cmd := jj.command(ctx, "config", "list", "--template="+template)
+	stdout := new(bytes.Buffer)
+	stdout.WriteByte('{')
+	cmd.Stdout = stdout
+
+	if err := runCommand(cmd); err != nil {
+		return nil, fmt.Errorf("jj config list: %v", err)
+	}
+	jsonData := stdout.Bytes()
+	jsonData = bytes.TrimSuffix(jsonData, []byte("\n"))
+	jsonData = bytes.TrimSuffix(jsonData, []byte(","))
+	jsonData = append(jsonData, '}')
+	result := make(map[string]jsontext.Value)
+	if err := jsonv2.Unmarshal(jsonData, &result); err != nil {
+		return result, fmt.Errorf("jj config list: %v", err)
+	}
+	return result, nil
+}
+
 // SetRepositorySetting sets a configuration setting on the repository.
 func (jj *Jujutsu) SetRepositorySetting(ctx context.Context, key, value string) error {
 	cmd := jj.command(ctx, "config", "set", "--ignore-working-copy", "--repo", "--", key, value)
@@ -255,6 +277,16 @@ func (jj *Jujutsu) WorkspaceRoot(ctx context.Context) (string, error) {
 	out, err := jj.command(ctx, "workspace", "root", "--ignore-working-copy").Output()
 	if err != nil {
 		return "", fmt.Errorf("jj workspace root: %v", err)
+	}
+	return string(bytes.TrimSuffix(out, []byte("\n"))), nil
+}
+
+// GitRoot returns the path to the underlying Git directory
+// of a repository using the Git backend.
+func (jj *Jujutsu) GitRoot(ctx context.Context) (string, error) {
+	out, err := jj.command(ctx, "git", "root", "--ignore-working-copy").Output()
+	if err != nil {
+		return "", fmt.Errorf("jj git root: %v", err)
 	}
 	return string(bytes.TrimSuffix(out, []byte("\n"))), nil
 }

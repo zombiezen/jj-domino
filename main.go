@@ -33,7 +33,9 @@ import (
 	"slices"
 	"strings"
 
+	"gg-scm.io/pkg/git"
 	"github.com/alecthomas/kong"
+	jsonv2 "github.com/go-json-experiment/json"
 	"github.com/shurcooL/githubv4"
 	"zombiezen.com/go/jj-domino/internal/jujutsu"
 )
@@ -48,6 +50,7 @@ type submitCmd struct {
 	TemplatePath *string `short:"t" help:"Template path"`
 	Bookmark     string  `short:"b" help:"Bookmark to send"`
 	Root         *string `short:"R" help:"Optional repository root (defaults to \"jj root\")"`
+	DryRun       bool    `short:"n" help:"Don't send to GitHub"`
 }
 
 type doctorCmd struct{}
@@ -61,18 +64,94 @@ func (c *submitCmd) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	root, err := jj.WorkspaceRoot(ctx)
+	bookmarks, err := jj.ListBookmarks(ctx)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("root: %#v\n", root)
 
-	stack, err := stackForBookmark(ctx, jj, c.Bookmark)
+	stack, err := stackForBookmark(ctx, jj, bookmarks, c.Bookmark)
 	if err != nil {
 		return err
 	}
-	for _, pr := range stack {
-		fmt.Printf("%s\t%s\n", pr.commit.ChangeID.Short(), pr.bookmarkName)
+
+	cfg, err := jj.ReadSettings(ctx)
+	if err != nil {
+		return err
+	}
+	var trunkRevset string
+	if err := jsonv2.Unmarshal(cfg[`revset-aliases."trunk()"`], &trunkRevset); err != nil {
+		return fmt.Errorf("trunk: %v", err)
+	}
+	trunkRefSymbol, err := jujutsu.ParseRefSymbol(trunkRevset)
+	if err != nil {
+		return fmt.Errorf("trunk %q: %v", trunkRevset, err)
+	}
+	if trunkRefSymbol.Remote == "" {
+		return fmt.Errorf("trunk() does not have an associated remote")
+	}
+	pushRemoteName := "origin"
+	if pushSetting := cfg["git.push"]; len(pushSetting) > 0 {
+		if err := jsonv2.Unmarshal(pushSetting, &pushRemoteName); err != nil {
+			return fmt.Errorf("git.push: %v", err)
+		}
+	}
+
+	gitRoot, err := jj.GitRoot(ctx)
+	if err != nil {
+		return err
+	}
+	g, err := git.New(git.Options{Dir: gitRoot})
+	if err != nil {
+		return err
+	}
+	gitConfig, err := g.ReadConfig(ctx)
+	if err != nil {
+		return err
+	}
+	remotes := gitConfig.ListRemotes()
+	baseRemote := remotes[trunkRefSymbol.Remote]
+	if baseRemote == nil {
+		return fmt.Errorf("unknown remote %s from trunk()", trunkRefSymbol.Remote)
+	}
+	baseRepo, err := gitHubRepositoryForURL(baseRemote.FetchURL)
+	if err != nil {
+		return fmt.Errorf("trunk() remote: %v", err)
+	}
+	pushRemote := remotes[pushRemoteName]
+	if pushRemote == nil {
+		return fmt.Errorf("unknown remote %s from git.push", pushRemoteName)
+	}
+	headRepo, err := gitHubRepositoryForURL(pushRemote.PushURL)
+	if err != nil {
+		return fmt.Errorf("push remote: %v", err)
+	}
+
+	if headRepo == baseRepo {
+		for i, pr := range stack {
+			var prBase string
+			if i == 0 {
+				prBase = trunkRefSymbol.Name
+			} else {
+				prBase = stack[i-1].bookmarkName
+			}
+			fmt.Printf("%s    %s ← %s\n", pr.commit.ChangeID.Short(), prBase, pr.bookmarkName)
+		}
+	} else {
+		fmt.Printf("%s    %s:%s ← %s:%s\n",
+			stack[0].commit.ChangeID.Short(),
+			baseRepo.Owner, trunkRefSymbol.Name,
+			headRepo.Owner, stack[0].bookmarkName,
+		)
+		for _, pr := range stack {
+			fmt.Printf("%s    %s:%s ← %s:%s (draft)\n",
+				pr.commit.ChangeID.Short(),
+				baseRepo.Owner, trunkRefSymbol.Name,
+				headRepo.Owner, pr.bookmarkName,
+			)
+		}
+	}
+	if c.DryRun {
+		return nil
 	}
 
 	return nil
@@ -83,16 +162,12 @@ type intendedPR struct {
 	commit       *jujutsu.Commit
 }
 
-func stackForBookmark(ctx context.Context, jj *jujutsu.Jujutsu, bookmark string) ([]intendedPR, error) {
+func stackForBookmark(ctx context.Context, jj *jujutsu.Jujutsu, bookmarks []*jujutsu.Bookmark, bookmark string) ([]intendedPR, error) {
 	type stackFrame struct {
 		curr  *jujutsu.Commit
 		trail []intendedPR
 	}
 
-	bookmarks, err := jj.ListBookmarks(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("compute stack for %q: %v", bookmark, err)
-	}
 	i := slices.IndexFunc(bookmarks, func(b *jujutsu.Bookmark) bool {
 		return b.Name == bookmark && b.Remote == ""
 	})
@@ -107,7 +182,7 @@ func stackForBookmark(ctx context.Context, jj *jujutsu.Jujutsu, bookmark string)
 
 	revset := "trunk().." + headCommitID.String()
 	changes := make(map[string]*jujutsu.Commit)
-	err = jj.Log(ctx, revset, func(c *jujutsu.Commit) bool {
+	err := jj.Log(ctx, revset, func(c *jujutsu.Commit) bool {
 		changes[string(c.ID)] = c
 		return true
 	})
@@ -163,6 +238,28 @@ func stackForBookmark(ctx context.Context, jj *jujutsu.Jujutsu, bookmark string)
 		resultError = fmt.Errorf("compute stack for %q: %w", bookmark, resultError)
 	}
 	return stack, resultError
+}
+
+type githubRepositoryPath struct {
+	Owner string
+	Repo  string
+}
+
+func gitHubRepositoryForURL(urlstr string) (githubRepositoryPath, error) {
+	u, err := git.ParseURL(urlstr)
+	if err != nil {
+		return githubRepositoryPath{}, err
+	}
+	if u.Host != "github.com" || !(u.Scheme == "https" || u.Scheme == "ssh" && u.User.Username() == "git") {
+		return githubRepositoryPath{}, fmt.Errorf("%s is not a GitHub repository", urlstr)
+	}
+	var p githubRepositoryPath
+	var ok bool
+	p.Owner, p.Repo, ok = strings.Cut(strings.TrimPrefix(u.Path, "/"), "/")
+	if !ok || strings.Contains(p.Repo, "/") {
+		return githubRepositoryPath{}, fmt.Errorf("%s is not a GitHub repository", urlstr)
+	}
+	return p, nil
 }
 
 func (c *doctorCmd) Run(ctx context.Context) error {
