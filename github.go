@@ -53,6 +53,7 @@ func gitHubRepositoryForURL(urlstr string) (gitHubRepositoryPath, error) {
 	if !ok || strings.Contains(p.Repo, "/") {
 		return gitHubRepositoryPath{}, fmt.Errorf("%s is not a GitHub repository", urlstr)
 	}
+	p.Repo = strings.TrimSuffix(p.Repo, ".git")
 	return p, nil
 }
 
