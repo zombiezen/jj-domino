@@ -139,6 +139,8 @@ func (c *submitCmd) Run(ctx context.Context) error {
 		plan := planPullRequests(baseRepoPath, trunkRefSymbol.Name, placeholderGitHubRepository(headRepoPath), stack)
 		sb := new(strings.Builder)
 		for _, pr := range plan {
+			sb.WriteString(prNumberPlaceholder(defaultPRNumberWidth))
+			sb.WriteString(": ")
 			pr.writeLogLine(sb)
 			sb.WriteString("\n")
 		}
