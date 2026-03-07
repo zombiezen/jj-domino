@@ -27,11 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"net/http"
-	"os"
-	"os/exec"
 	"slices"
-	"strings"
 
 	"gg-scm.io/pkg/git"
 	"github.com/alecthomas/kong"
@@ -240,28 +236,6 @@ func stackForBookmark(ctx context.Context, jj *jujutsu.Jujutsu, bookmarks []*juj
 	return stack, resultError
 }
 
-type githubRepositoryPath struct {
-	Owner string
-	Repo  string
-}
-
-func gitHubRepositoryForURL(urlstr string) (githubRepositoryPath, error) {
-	u, err := git.ParseURL(urlstr)
-	if err != nil {
-		return githubRepositoryPath{}, err
-	}
-	if u.Host != "github.com" || !(u.Scheme == "https" || u.Scheme == "ssh" && u.User.Username() == "git") {
-		return githubRepositoryPath{}, fmt.Errorf("%s is not a GitHub repository", urlstr)
-	}
-	var p githubRepositoryPath
-	var ok bool
-	p.Owner, p.Repo, ok = strings.Cut(strings.TrimPrefix(u.Path, "/"), "/")
-	if !ok || strings.Contains(p.Repo, "/") {
-		return githubRepositoryPath{}, fmt.Errorf("%s is not a GitHub repository", urlstr)
-	}
-	return p, nil
-}
-
 func (c *doctorCmd) Run(ctx context.Context) error {
 	token, err := gitHubToken(ctx)
 	if err != nil {
@@ -282,35 +256,6 @@ func (c *doctorCmd) Run(ctx context.Context) error {
 
 	fmt.Printf("Authenticated as: %s\n", query.Viewer.Login)
 	return nil
-}
-
-func newGitHubHTTPClient(token string) *http.Client {
-	return &http.Client{
-		Transport: tokenTransport{
-			host:  "api.github.com",
-			token: token,
-			rt:    http.DefaultTransport,
-		},
-	}
-}
-
-func gitHubToken(ctx context.Context) (string, error) {
-	// Prefer `gh`, fall back to env vars if not available
-	cmd := exec.CommandContext(ctx, "gh", "auth", "status")
-	if err := cmd.Run(); err == nil {
-		cmd = exec.CommandContext(ctx, "gh", "auth", "token")
-		var raw []byte
-		if raw, err = cmd.Output(); err == nil {
-			return strings.TrimSpace(string(raw)), nil
-		}
-	}
-	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-		return token, nil
-	}
-	if token := os.Getenv("GH_TOKEN"); token != "" {
-		return token, nil
-	}
-	return "", errors.New("GITHUB_TOKEN not set")
 }
 
 func main() {
