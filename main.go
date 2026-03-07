@@ -23,11 +23,16 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"iter"
 	"log"
+	"os"
 	"slices"
+	"strconv"
+	"strings"
 
 	"gg-scm.io/pkg/git"
 	"github.com/alecthomas/kong"
@@ -50,6 +55,8 @@ type submitCmd struct {
 }
 
 func (c *submitCmd) Run(ctx context.Context) error {
+	const defaultPRNumberWidth = 3
+
 	opts := jujutsu.Options{}
 	if c.Root != nil {
 		opts.Dir = *c.Root
@@ -107,7 +114,7 @@ func (c *submitCmd) Run(ctx context.Context) error {
 	if baseRemote == nil {
 		return fmt.Errorf("unknown remote %s from trunk()", trunkRefSymbol.Remote)
 	}
-	baseRepo, err := gitHubRepositoryForURL(baseRemote.FetchURL)
+	baseRepoPath, err := gitHubRepositoryForURL(baseRemote.FetchURL)
 	if err != nil {
 		return fmt.Errorf("trunk() remote: %v", err)
 	}
@@ -115,40 +122,188 @@ func (c *submitCmd) Run(ctx context.Context) error {
 	if pushRemote == nil {
 		return fmt.Errorf("unknown remote %s from git.push", pushRemoteName)
 	}
-	headRepo, err := gitHubRepositoryForURL(pushRemote.PushURL)
+	headRepoPath, err := gitHubRepositoryForURL(pushRemote.PushURL)
 	if err != nil {
 		return fmt.Errorf("push remote: %v", err)
 	}
 
-	if headRepo == baseRepo {
-		for i, pr := range stack {
-			var prBase string
-			if i == 0 {
-				prBase = trunkRefSymbol.Name
-			} else {
-				prBase = stack[i-1].name
-			}
-			fmt.Printf("%s    %s ← %s\n", pr.commit.ChangeID.Short(), prBase, pr.name)
+	token, err := gitHubToken(ctx)
+	if err != nil {
+		if !c.DryRun {
+			return err
 		}
-	} else {
-		fmt.Printf("%s    %s:%s ← %s:%s\n",
-			stack[0].commit.ChangeID.Short(),
-			baseRepo.Owner, trunkRefSymbol.Name,
-			headRepo.Owner, stack[0].name,
-		)
-		for _, pr := range stack {
-			fmt.Printf("%s    %s:%s ← %s:%s (draft)\n",
-				pr.commit.ChangeID.Short(),
-				baseRepo.Owner, trunkRefSymbol.Name,
-				headRepo.Owner, pr.name,
-			)
+		// If we're doing a dry run, don't worry about GitHub API.
+		// We can still display the proposed PRs.
+		log.Printf("Unable to authenticate to GitHub: %v", err)
+
+		plan := planPullRequests(baseRepoPath, trunkRefSymbol.Name, placeholderGitHubRepository(headRepoPath), stack)
+		sb := new(strings.Builder)
+		for _, pr := range plan {
+			pr.writeLogLine(sb)
+			sb.WriteString("\n")
 		}
-	}
-	if c.DryRun {
+		os.Stdout.WriteString(sb.String())
 		return nil
 	}
 
+	httpClient := newGitHubHTTPClient(token)
+	defer httpClient.CloseIdleConnections()
+	gitHubClient := githubv4.NewClient(httpClient)
+
+	headRepo := placeholderGitHubRepository(headRepoPath)
+	var planError error
+	if !c.DryRun {
+		newHeadRepo, err := fetchRepository(ctx, gitHubClient, headRepoPath)
+		if err != nil {
+			// If we fail to fetch the head repository, don't stop immediately.
+			// We need it to create pull requests,
+			// but we don't need it for planning.
+			planError = errors.Join(planError, err)
+		} else {
+			headRepo = newHeadRepo
+		}
+	}
+
+	plan := planPullRequests(baseRepoPath, trunkRefSymbol.Name, headRepo, stack)
+
+	var baseRepo *gitHubRepository
+	for _, pr := range plan {
+		newBaseRepo, existingPR, err := findOpenPullRequestForHead(ctx, gitHubClient, baseRepoPath, headRepoPath, string(pr.HeadRefName))
+		baseRepo = cmp.Or(newBaseRepo, baseRepo)
+		if err != nil && !errors.Is(err, errPullRequestNotFound) {
+			planError = errors.Join(planError, err)
+			continue
+		}
+		if existingPR != nil {
+			pr.ID = existingPR.ID
+			pr.Number = existingPR.Number
+			pr.Title = existingPR.Title
+			pr.HeadRepository = existingPR.HeadRepository
+			// TODO(#10): Modify body in place with footer.
+			pr.Body = existingPR.Body
+		}
+	}
+	if planError != nil {
+		return planError
+	}
+
+	if c.DryRun {
+		prNumberWidth := cmp.Or(maxIntWidth(func(yield func(githubv4.Int) bool) {
+			for _, pr := range plan {
+				if pr.ID != nil {
+					if !yield(pr.Number) {
+						return
+					}
+				}
+			}
+		}), defaultPRNumberWidth)
+		sb := new(strings.Builder)
+		for _, pr := range plan {
+			if pr.ID == nil {
+				sb.WriteString(prNumberPlaceholder(prNumberWidth))
+			} else {
+				sb.WriteString(formatPRNumber(pr.Number, prNumberWidth))
+			}
+			sb.WriteString(": ")
+			pr.writeLogLine(sb)
+			sb.WriteString("\n")
+		}
+		os.Stdout.WriteString(sb.String())
+		return nil
+	}
+
+	prNumberWidth := cmp.Or(maxIntWidth(func(yield func(githubv4.Int) bool) {
+		for _, pr := range plan {
+			if pr.ID != nil {
+				if !yield(pr.Number) {
+					return
+				}
+			}
+		}
+	}), defaultPRNumberWidth)
+	for _, pr := range plan {
+		isNew := pr.ID == nil
+		if isNew {
+			if err := createPullRequest(ctx, gitHubClient, baseRepo, &pr.pullRequest); err != nil {
+				return err
+			}
+		} else {
+			if err := updatePullRequest(ctx, gitHubClient, baseRepoPath, &pr.pullRequest); err != nil {
+				return err
+			}
+		}
+		prNumberWidth = max(prNumberWidth, maxIntWidth(func(yield func(githubv4.Int) bool) {
+			yield(pr.Number)
+		}))
+		sb := new(strings.Builder)
+		sb.WriteString(formatPRNumber(pr.Number, prNumberWidth))
+		sb.WriteString(": ")
+		pr.writeLogLine(sb)
+		if isNew {
+			sb.WriteString(" (new)")
+		}
+		sb.WriteString("\n")
+		os.Stdout.WriteString(sb.String())
+	}
+
 	return nil
+}
+
+type plannedPullRequest struct {
+	pullRequest
+	baseRepositoryPath gitHubRepositoryPath
+}
+
+func planPullRequests(baseRepoPath gitHubRepositoryPath, baseRefName string, headRepo *gitHubRepository, stack []localCommitRef) []*plannedPullRequest {
+	plan := make([]*plannedPullRequest, 0, len(stack))
+	isFork := headRepo.path() != baseRepoPath
+	for i, bookmark := range stack {
+		var prBase string
+		if i == 0 || isFork {
+			// A pull request's base ref must be in the pull request's repository.
+			// If we're pulling from a fork, then always use the trunk.
+			prBase = baseRefName
+		} else {
+			prBase = stack[i-1].name
+		}
+		title, body := cutCommitDescription(bookmark.commit.Description)
+		// TODO(#10): Add footer.
+		plan = append(plan, &plannedPullRequest{
+			baseRepositoryPath: baseRepoPath,
+			pullRequest: pullRequest{
+				BaseRefName:    githubv4.String(prBase),
+				HeadRepository: headRepo,
+				HeadRefName:    githubv4.String(bookmark.name),
+
+				Title:   githubv4.String(title),
+				Body:    githubv4.String(body),
+				IsDraft: githubv4.Boolean(i > 0),
+			},
+		})
+	}
+	return plan
+}
+
+func (pr *plannedPullRequest) writeLogLine(sb *strings.Builder) {
+	if pr.IsDraft {
+		sb.WriteString("[DRAFT] ")
+	}
+	sb.WriteString(string(pr.Title))
+	sb.WriteString(" [")
+	if pr.HeadRepository.path() == pr.baseRepositoryPath {
+		sb.WriteString(string(pr.BaseRefName))
+		sb.WriteString(" ← ")
+		sb.WriteString(string(pr.HeadRefName))
+	} else {
+		sb.WriteString(pr.baseRepositoryPath.Owner)
+		sb.WriteString(":")
+		sb.WriteString(string(pr.BaseRefName))
+		sb.WriteString(" ← ")
+		sb.WriteString(string(pr.HeadRepository.Owner.Login))
+		sb.WriteString(":")
+		sb.WriteString(string(pr.HeadRefName))
+	}
+	sb.WriteString("]")
 }
 
 type localCommitRef struct {
@@ -264,4 +419,52 @@ func main() {
 	if err := ctx.Run(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func cutCommitDescription(s string) (title, body string) {
+	title, body, _ = strings.Cut(s, "\n")
+	body = strings.TrimSpace(body)
+	return
+}
+
+func formatPRNumber(n githubv4.Int, width int) string {
+	buf := make([]byte, 0, width+1)
+	buf = append(buf, '#')
+	buf = strconv.AppendInt(buf, int64(n), 10)
+	if n := len(buf); n < width+1 {
+		buf = buf[:width+1]
+		newStart := width + 1 - n
+		copy(buf[newStart:], buf[:n])
+		for i := range newStart {
+			buf[i] = ' '
+		}
+	}
+	return string(buf)
+}
+
+func prNumberPlaceholder(width int) string {
+	sb := new(strings.Builder)
+	sb.Grow(width + 1)
+	sb.WriteByte('#')
+	for range width {
+		sb.WriteByte('X')
+	}
+	return sb.String()
+}
+
+func maxIntWidth[T ~int | ~int8 | ~int16 | ~int32 | ~int64](nums iter.Seq[T]) int {
+	maxWidth := 0
+	for n := range nums {
+		w := 1
+		if n < 0 {
+			w++
+			n = -n
+		}
+		for n >= 10 {
+			w++
+			n /= 10
+		}
+		maxWidth = max(maxWidth, w)
+	}
+	return maxWidth
 }

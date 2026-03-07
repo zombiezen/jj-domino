@@ -27,11 +27,13 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
 
 	"gg-scm.io/pkg/git"
+	"github.com/shurcooL/githubv4"
 )
 
 type gitHubRepositoryPath struct {
@@ -56,6 +58,183 @@ func gitHubRepositoryForURL(urlstr string) (gitHubRepositoryPath, error) {
 	p.Repo = strings.TrimSuffix(p.Repo, ".git")
 	return p, nil
 }
+
+func (path gitHubRepositoryPath) String() string {
+	return url.PathEscape(path.Owner) + "/" + url.PathEscape(path.Repo)
+}
+
+type pullRequest struct {
+	ID      githubv4.ID
+	Number  githubv4.Int
+	Title   githubv4.String
+	IsDraft githubv4.Boolean
+	Body    githubv4.String
+
+	BaseRefName    githubv4.String
+	HeadRepository *gitHubRepository
+	HeadRefName    githubv4.String
+}
+
+type gitHubRepository struct {
+	ID    githubv4.ID
+	Name  githubv4.String
+	Owner *gitHubRepositoryOwner
+}
+
+func placeholderGitHubRepository(path gitHubRepositoryPath) *gitHubRepository {
+	return &gitHubRepository{
+		Owner: &gitHubRepositoryOwner{Login: githubv4.String(path.Owner)},
+		Name:  githubv4.String(path.Repo),
+	}
+}
+
+func fetchRepository(ctx context.Context, client *githubv4.Client, path gitHubRepositoryPath) (*gitHubRepository, error) {
+
+	var query struct {
+		Repository *gitHubRepository `graphql:"repository(owner: $owner, name: $name)"`
+	}
+	err := client.Query(ctx, &query, map[string]any{
+		"owner": githubv4.String(path.Owner),
+		"name":  githubv4.String(path.Repo),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get %v: %v", path, err)
+	}
+	return query.Repository, nil
+}
+
+func (repo *gitHubRepository) path() gitHubRepositoryPath {
+	p := gitHubRepositoryPath{Repo: string(repo.Name)}
+	if repo.Owner != nil {
+		p.Owner = string(repo.Owner.Login)
+	}
+	return p
+}
+
+type gitHubRepositoryOwner struct {
+	Login githubv4.String
+}
+
+func (owner *gitHubRepositoryOwner) String() string {
+	if owner == nil {
+		return ""
+	}
+	return string(owner.Login)
+}
+
+type gitHubPageInfo struct {
+	EndCursor   githubv4.String
+	HasNextPage githubv4.Boolean
+}
+
+func findOpenPullRequestForHead(ctx context.Context, client *githubv4.Client, baseRepoPath gitHubRepositoryPath, headRepoPath gitHubRepositoryPath, headRef string) (baseRepo *gitHubRepository, result *pullRequest, err error) {
+	defer func() {
+		if err != nil {
+			qualifiedHeadRef := headRef
+			if headRepoPath != baseRepoPath {
+				qualifiedHeadRef = headRepoPath.Owner + ":" + headRef
+			}
+			err = fmt.Errorf("find pull request on %v for %s: %w", baseRepoPath, qualifiedHeadRef, err)
+		}
+	}()
+
+	vars := map[string]any{
+		"baseOwner": githubv4.String(baseRepoPath.Owner),
+		"baseRepo":  githubv4.String(baseRepoPath.Repo),
+		"headRef":   githubv4.String(headRef),
+		"cursor":    (*githubv4.String)(nil),
+	}
+	for {
+		var query struct {
+			Repository struct {
+				gitHubRepository
+
+				PullRequests struct {
+					Nodes    []*pullRequest
+					PageInfo gitHubPageInfo
+				} `graphql:"pullRequests(headRefName: $headRef, states: [OPEN], first: 50, after: $cursor)"`
+			} `graphql:"repository(owner: $baseOwner, name: $baseRepo)"`
+		}
+		if err := client.Query(ctx, &query, vars); err != nil {
+			// Make error opaque.
+			return nil, nil, errors.New(err.Error())
+		}
+		baseRepo = &query.Repository.gitHubRepository
+
+		for _, pr := range query.Repository.PullRequests.Nodes {
+			if pr.HeadRepository != nil && pr.HeadRepository.path() == headRepoPath {
+				if result != nil {
+					return baseRepo, nil, fmt.Errorf("found multiple (#%d and #%d)", result.Number, pr.Number)
+				}
+				result = pr
+			}
+		}
+
+		if !query.Repository.PullRequests.PageInfo.HasNextPage {
+			break
+		}
+		vars["cursor"] = query.Repository.PullRequests.PageInfo.EndCursor
+	}
+
+	if result == nil {
+		return baseRepo, nil, errPullRequestNotFound
+	}
+	return baseRepo, result, nil
+}
+
+func createPullRequest(ctx context.Context, client *githubv4.Client, baseRepo *gitHubRepository, pr *pullRequest) error {
+	var mutation struct {
+		CreatePullRequest struct {
+			PullRequest struct {
+				ID     githubv4.ID
+				Number githubv4.Int
+			}
+		} `graphql:"createPullRequest(input: $input)"`
+	}
+
+	err := client.Mutate(ctx, &mutation, githubv4.CreatePullRequestInput{
+		RepositoryID: baseRepo.ID,
+		Title:        pr.Title,
+		Body:         new(pr.Body),
+		Draft:        new(pr.IsDraft),
+
+		BaseRefName:      pr.BaseRefName,
+		HeadRefName:      pr.HeadRefName,
+		HeadRepositoryID: new(pr.HeadRepository.ID),
+	}, nil)
+	if err != nil {
+		qualifiedHeadRef := pr.HeadRefName
+		if pr.HeadRepository.ID != baseRepo.ID {
+			qualifiedHeadRef = pr.HeadRepository.Owner.Login + ":" + pr.HeadRefName
+		}
+		return fmt.Errorf("create pull request on %v for %s: %v", baseRepo.path(), qualifiedHeadRef, err)
+	}
+
+	pr.ID = mutation.CreatePullRequest.PullRequest.ID
+	pr.Number = mutation.CreatePullRequest.PullRequest.Number
+	return nil
+}
+
+// updatePullRequest updates the body and base ref name of the pull request.
+func updatePullRequest(ctx context.Context, client *githubv4.Client, baseRepoPath gitHubRepositoryPath, pr *pullRequest) error {
+	var mutation struct {
+		UpdatePullRequest struct {
+			_ struct{} `graphql:"..."`
+		} `graphql:"updatePullRequest(input: $input)"`
+	}
+
+	err := client.Mutate(ctx, &mutation, githubv4.UpdatePullRequestInput{
+		PullRequestID: pr.ID,
+		Body:          new(pr.Body),
+		BaseRefName:   new(pr.BaseRefName),
+	}, nil)
+	if err != nil {
+		return fmt.Errorf("update pull request %v#%d body: %v", baseRepoPath, pr.Number, err)
+	}
+	return nil
+}
+
+var errPullRequestNotFound = errors.New("pull request not found")
 
 func newGitHubHTTPClient(token string) *http.Client {
 	return &http.Client{
