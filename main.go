@@ -49,8 +49,6 @@ type submitCmd struct {
 	DryRun       bool    `short:"n" help:"Don't send to GitHub"`
 }
 
-type doctorCmd struct{}
-
 func (c *submitCmd) Run(ctx context.Context) error {
 	opts := jujutsu.Options{}
 	if c.Root != nil {
@@ -235,6 +233,8 @@ func stackForBookmark(ctx context.Context, jj *jujutsu.Jujutsu, bookmarks []*juj
 	}
 	return stack, resultError
 }
+
+type doctorCmd struct{}
 
 func (c *doctorCmd) Run(ctx context.Context) error {
 	token, err := gitHubToken(ctx)
