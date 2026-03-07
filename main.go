@@ -288,7 +288,6 @@ func planPullRequests(baseRepoPath gitHubRepositoryPath, baseRefName string, hea
 			prBase = stack[i-1].name
 		}
 		title, body := cutCommitDescription(bookmark.commit.Description)
-		// TODO(#10): Add footer.
 		plan = append(plan, &plannedPullRequest{
 			baseRepositoryPath: baseRepoPath,
 			pullRequest: pullRequest{
