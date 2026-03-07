@@ -30,6 +30,7 @@ import (
 	"io"
 	"iter"
 	"log"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -38,6 +39,7 @@ import (
 	"github.com/alecthomas/kong"
 	jsonv2 "github.com/go-json-experiment/json"
 	"github.com/shurcooL/githubv4"
+	"golang.org/x/term"
 	"zombiezen.com/go/jj-domino/internal/jujutsu"
 )
 
@@ -139,9 +141,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong) error {
 		plan := planPullRequests(baseRepoPath, trunkRefSymbol.Name, placeholderGitHubRepository(headRepoPath), stack)
 		sb := new(strings.Builder)
 		for _, pr := range plan {
-			sb.WriteString(prNumberPlaceholder(defaultPRNumberWidth))
-			sb.WriteString(": ")
-			pr.writeLogLine(sb)
+			pr.writeLogLine(sb, defaultPRNumberWidth, false)
 			sb.WriteString("\n")
 		}
 		io.WriteString(k.Stdout, sb.String())
@@ -182,12 +182,14 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong) error {
 			pr.Title = existingPR.Title
 			pr.HeadRepository = existingPR.HeadRepository
 			pr.Body = githubv4.String(trimStackFooter(string(existingPR.Body)))
+			pr.URL = existingPR.URL
 		}
 	}
 	if planError != nil {
 		return planError
 	}
 
+	isStdoutTerminal := isTerminal(k.Stdout)
 	if c.DryRun {
 		prNumberWidth := cmp.Or(maxIntWidth(func(yield func(githubv4.Int) bool) {
 			for _, pr := range plan {
@@ -200,13 +202,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong) error {
 		}), defaultPRNumberWidth)
 		sb := new(strings.Builder)
 		for _, pr := range plan {
-			if pr.ID == nil {
-				sb.WriteString(prNumberPlaceholder(prNumberWidth))
-			} else {
-				sb.WriteString(formatPRNumber(pr.Number, prNumberWidth))
-			}
-			sb.WriteString(": ")
-			pr.writeLogLine(sb)
+			pr.writeLogLine(sb, prNumberWidth, isStdoutTerminal)
 			if pr.ID == nil {
 				sb.WriteString(" (new)")
 			}
@@ -242,11 +238,8 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong) error {
 			yield(pr.Number)
 		}))
 		sb := new(strings.Builder)
-		sb.WriteString(formatPRNumber(pr.Number, prNumberWidth))
-		sb.WriteString(": ")
-		pr.writeLogLine(sb)
-		sb.WriteString(" (new)")
-		sb.WriteString("\n")
+		pr.writeLogLine(sb, prNumberWidth, isStdoutTerminal)
+		sb.WriteString(" (new)\n")
 		io.WriteString(k.Stdout, sb.String())
 	}
 
@@ -263,9 +256,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong) error {
 		}
 		if !isNew[i] {
 			sb := new(strings.Builder)
-			sb.WriteString(formatPRNumber(pr.Number, prNumberWidth))
-			sb.WriteString(": ")
-			pr.writeLogLine(sb)
+			pr.writeLogLine(sb, prNumberWidth, isStdoutTerminal)
 			sb.WriteString("\n")
 			io.WriteString(k.Stdout, sb.String())
 		}
@@ -309,11 +300,33 @@ func planPullRequests(baseRepoPath gitHubRepositoryPath, baseRefName string, hea
 	return plan
 }
 
-func (pr *plannedPullRequest) writeLogLine(sb *strings.Builder) {
+func (pr *plannedPullRequest) writeLogLine(sb *strings.Builder, prNumberWidth int, link bool) {
+	wroteLink := false
+	if pr.ID == nil {
+		sb.WriteString(prNumberPlaceholder(prNumberWidth))
+	} else {
+		formatted := formatPRNumber(pr.Number, prNumberWidth)
+		if link && pr.URL.URL != nil {
+			i := strings.IndexByte(formatted, '#')
+			sb.WriteString(formatted[:i])
+			sb.WriteString(osc + "8;;")
+			sb.WriteString(pr.URL.String())
+			sb.WriteString(st)
+			sb.WriteString(formatted[i:])
+			wroteLink = true
+		} else {
+			sb.WriteString(formatted)
+		}
+	}
+	sb.WriteString(": ")
 	if pr.IsDraft {
 		sb.WriteString("[DRAFT] ")
 	}
 	sb.WriteString(string(pr.Title))
+	if wroteLink {
+		sb.WriteString(endLink)
+	}
+
 	sb.WriteString(" [")
 	if pr.HeadRepository.path() == pr.baseRepositoryPath {
 		sb.WriteString(string(pr.BaseRefName))
@@ -500,6 +513,18 @@ func cutCommitDescription(s string) (title, body string) {
 	return
 }
 
+// ANSI escape codes.
+// Details about hyperlinks at https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda
+const (
+	// osc is the escape sequence for an Operating System Command (OSC).
+	osc = "\x1b]"
+	// st is the escape sequence for a String Terminator (ST).
+	st = "\x1b\\"
+
+	// endLink is the escape sequence that ends a hyperlink.
+	endLink = osc + "8;;" + st
+)
+
 func formatPRNumber(n githubv4.Int, width int) string {
 	buf := make([]byte, 0, width+1)
 	buf = append(buf, '#')
@@ -540,4 +565,9 @@ func maxIntWidth[T ~int | ~int8 | ~int16 | ~int32 | ~int64](nums iter.Seq[T]) in
 		maxWidth = max(maxWidth, w)
 	}
 	return maxWidth
+}
+
+func isTerminal(f io.Writer) bool {
+	osFile, ok := f.(*os.File)
+	return ok && term.IsTerminal(int(osFile.Fd()))
 }
