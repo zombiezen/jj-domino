@@ -44,25 +44,20 @@ import (
 )
 
 type cli struct {
-	Submit submitCmd `cmd:"" help:"Submit a review stack"`
-	Doctor doctorCmd `cmd:"" help:"Verify auth and config settings"`
+	Submit submitCmd `kong:"cmd,default=withargs,help=Submit a review stack"`
+	Doctor doctorCmd `kong:"cmd,help=Verify auth and config settings"`
 }
 
 type submitCmd struct {
-	Draft        bool    `short:"d" help:"Submit PR as draft"`
-	TemplatePath *string `short:"t" help:"Template path"`
-	Bookmark     string  `short:"b" help:"Bookmark to send"`
-	Root         *string `short:"R" help:"Optional repository root (defaults to \"jj root\")"`
-	DryRun       bool    `short:"n" help:"Don't send to GitHub"`
+	Draft    bool   `kong:"short=d,help=Mark base pull request as draft"`
+	Bookmark string `kong:"short=b,help=Bookmark to send,placeholder=NAME"`
+	DryRun   bool   `kong:"short=n,help=Don\\'t send to GitHub"`
 }
 
 func (c *submitCmd) Run(ctx context.Context, k *kong.Kong) error {
 	const defaultPRNumberWidth = 3
 
 	opts := jujutsu.Options{}
-	if c.Root != nil {
-		opts.Dir = *c.Root
-	}
 	jj, err := jujutsu.New(opts)
 	if err != nil {
 		return err
@@ -139,6 +134,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong) error {
 		log.Printf("Unable to authenticate to GitHub: %v", err)
 
 		plan := planPullRequests(baseRepoPath, trunkRefSymbol.Name, placeholderGitHubRepository(headRepoPath), stack)
+		plan[0].IsDraft = githubv4.Boolean(c.Draft)
 		sb := new(strings.Builder)
 		for _, pr := range plan {
 			pr.writeLogLine(sb, defaultPRNumberWidth, false)
@@ -167,6 +163,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong) error {
 	}
 
 	plan := planPullRequests(baseRepoPath, trunkRefSymbol.Name, headRepo, stack)
+	plan[0].IsDraft = githubv4.Boolean(c.Draft)
 
 	var baseRepo *gitHubRepository
 	for _, pr := range plan {
