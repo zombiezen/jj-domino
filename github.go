@@ -237,6 +237,38 @@ func updatePullRequest(ctx context.Context, client *githubv4.Client, baseRepoPat
 	return nil
 }
 
+// updatePullRequestDraftStatus updates the draft status of the pull request
+// to the value of pr.IsDraft.
+func updatePullRequestDraftStatus(ctx context.Context, client *githubv4.Client, baseRepoPath gitHubRepositoryPath, pr *pullRequest) error {
+	if pr.IsDraft {
+		var mutation struct {
+			ConvertPullRequestToDraft struct {
+				_ struct{} `graphql:"..."`
+			} `graphql:"convertPullRequestToDraft(input: $input)"`
+		}
+		err := client.Mutate(ctx, &mutation, githubv4.ConvertPullRequestToDraftInput{
+			PullRequestID: pr.ID,
+		}, nil)
+		if err != nil {
+			return fmt.Errorf("convert %v#%d to draft: %v", baseRepoPath, pr.Number, err)
+		}
+	} else {
+		var mutation struct {
+			MarkPullRequestReadyForReview struct {
+				_ struct{} `graphql:"..."`
+			} `graphql:"markPullRequestReadyForReview(input: $input)"`
+		}
+		err := client.Mutate(ctx, &mutation, githubv4.MarkPullRequestReadyForReviewInput{
+			PullRequestID: pr.ID,
+		}, nil)
+		if err != nil {
+			return fmt.Errorf("mark %v#%d as ready for review: %v", baseRepoPath, pr.Number, err)
+		}
+	}
+
+	return nil
+}
+
 var errPullRequestNotFound = errors.New("pull request not found")
 
 func newGitHubHTTPClient(token string) *http.Client {

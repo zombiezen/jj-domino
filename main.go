@@ -255,6 +255,11 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong) error {
 			return err
 		}
 		if !isNew[i] {
+			if err := updatePullRequestDraftStatus(ctx, gitHubClient, baseRepoPath, &pr.pullRequest); err != nil {
+				// Not a fatal error: the pull request still exists.
+				log.Print(err)
+			}
+
 			sb := new(strings.Builder)
 			pr.writeLogLine(sb, prNumberWidth, isStdoutTerminal)
 			sb.WriteString("\n")
