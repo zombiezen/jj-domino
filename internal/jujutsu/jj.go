@@ -95,6 +95,32 @@ func (jj *Jujutsu) command(ctx context.Context, args ...string) *exec.Cmd {
 	return cmd
 }
 
+// Invocation holds the parameters for a Jujutsu process.
+type Invocation struct {
+	// Args is the list of arguments to Jujutsu.
+	// It does not include a leading "jj" argument.
+	Args []string
+
+	// Stdout and Stderr specify the Jujutsu process's standard output and error.
+	//
+	// If either is nil, RunJJ connects the corresponding file descriptor
+	// to the null device.
+	//
+	// If Stdout and Stderr are the same writer,
+	// and have a type that can be compared with ==,
+	// at most one goroutine at a time will call Write.
+	Stdout io.Writer
+	Stderr io.Writer
+}
+
+// RunJJ executes a Jujutsu process.
+func (jj *Jujutsu) RunJJ(ctx context.Context, invocation *Invocation) error {
+	cmd := jj.command(ctx, invocation.Args...)
+	cmd.Stdout = invocation.Stdout
+	cmd.Stderr = invocation.Stderr
+	return cmd.Run()
+}
+
 // GitInitOptions is the set of optional parameters to [*Jujutsu.GitInit].
 type GitInitOptions struct {
 	Destination string
