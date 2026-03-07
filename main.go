@@ -53,6 +53,7 @@ type submitCmd struct {
 	Revisions []string `kong:"short=r,sep=none,help=Push stacks pointing to these commits (can be repeated),placeholder=REVSETS,xor=revisions"`
 	Draft     bool     `kong:"short=d,help=Mark base pull request as draft"`
 	DryRun    bool     `kong:"short=n,help=Don\\'t send to GitHub"`
+	Push      bool     `kong:"negatable,help=Push to GitHub (on by default),default=true"`
 }
 
 func (c *submitCmd) Run(ctx context.Context, k *kong.Kong) error {
@@ -220,6 +221,32 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong) error {
 	}
 
 	isStdoutTerminal := isTerminal(k.Stdout)
+
+	if c.Push {
+		pushOutput := k.Stderr
+		pushArgs := []string{"git", "push"}
+		if c.DryRun {
+			pushArgs = append(pushArgs, "--dry-run")
+			pushOutput = k.Stdout
+		}
+		pushArgs = append(pushArgs, "--remote="+pushRemoteName)
+		for _, pr := range plan {
+			pushArgs = append(pushArgs, "--bookmark=exact:"+jujutsu.Quote(string(pr.HeadRefName)))
+		}
+		if c.DryRun {
+			fmt.Fprintf(k.Stdout, "%% jj %s\n", strings.Join(pushArgs, " "))
+		}
+		err := jj.RunJJ(ctx, &jujutsu.Invocation{
+			Args:   pushArgs,
+			Stdout: pushOutput,
+			Stderr: pushOutput,
+		})
+		if err != nil && !c.DryRun {
+			return fmt.Errorf("jj git push --remote=%s: %v", pushRemoteName, err)
+		}
+		io.WriteString(pushOutput, "\n")
+	}
+
 	if c.DryRun {
 		prNumberWidth := cmp.Or(maxIntWidth(func(yield func(githubv4.Int) bool) {
 			for _, pr := range plan {
