@@ -112,3 +112,26 @@ func FuzzUnquote(f *testing.F) {
 		}
 	})
 }
+
+func TestParseRefSymbol(t *testing.T) {
+	tests := []struct {
+		s    string
+		want RefSymbol
+		err  bool
+	}{
+		{s: "", err: true},
+		{s: "foo", want: RefSymbol{Name: "foo"}},
+		{s: `"foo++bar"`, want: RefSymbol{Name: "foo++bar"}},
+		{s: "foo@bar", want: RefSymbol{Name: "foo", Remote: "bar"}},
+		{s: "  foo@bar  ", want: RefSymbol{Name: "foo", Remote: "bar"}},
+	}
+
+	for _, test := range tests {
+		got, err := parseRefSymbol(test.s)
+		if !test.err && (got != test.want || err != nil) {
+			t.Errorf("ParseRefSymbol(%q) = %+v, %v; want %+v, <nil>", test.s, got, err, test.want)
+		} else if test.err && (got != test.want || err == nil) {
+			t.Errorf("ParseRefSymbol(%q) = %+v, %v; want %+v, <error>", test.s, got, err, test.want)
+		}
+	}
+}

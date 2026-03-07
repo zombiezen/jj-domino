@@ -23,6 +23,7 @@
 package jujutsu
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"unicode"
@@ -64,6 +65,18 @@ func Quote(s string) string {
 	return sb.String()
 }
 
+func quoteIfNeeded(s string) string {
+	if s == "" {
+		return `""`
+	}
+	for _, c := range s {
+		if !IsIdentifierRune(c) {
+			return Quote(s)
+		}
+	}
+	return s
+}
+
 // Unquote interprets s as a revset symbol
 // (i.e. an identifier or a string literal),
 // returning the string value that s quotes.
@@ -72,20 +85,17 @@ func Unquote(s string) (string, error) {
 		return "", fmt.Errorf("unquote symbol: empty")
 	}
 
+	p := &parser[string]{s}
+	if _, err := p.symbol(); err != nil {
+		return "", fmt.Errorf("unquote symbol: %v", err)
+	}
+	if len(p.s) > 0 {
+		return "", fmt.Errorf("unquote symbol: trailing characters")
+	}
 	switch s[0] {
 	case '\'':
-		if len(s) < 2 || s[len(s)-1] != '\'' {
-			return "", fmt.Errorf("unquote symbol: invalid single-quoted syntax")
-		}
-		unquoted := s[1 : len(s)-1]
-		if strings.Contains(unquoted, "'") {
-			return "", fmt.Errorf("unquote symbol: invalid single-quoted syntax")
-		}
-		return unquoted, nil
+		return s[1 : len(s)-1], nil
 	case '"':
-		if len(s) < 2 || s[len(s)-1] != '"' {
-			return "", fmt.Errorf("unquote symbol: invalid double-quoted syntax")
-		}
 		inner := s[1 : len(s)-1]
 		if !strings.ContainsAny(inner, `\"`) {
 			return inner, nil
@@ -134,41 +144,217 @@ func Unquote(s string) (string, error) {
 			}
 		}
 		return sb.String(), nil
+	default:
+		return s, nil
 	}
+}
 
-	// Try for identifier.
-	r, i := utf8.DecodeRuneInString(s)
-	if !IsIdentifierRune(r) {
-		return "", fmt.Errorf("unquote symbol: invalid identifier syntax")
+// RefSymbol is a bookmark or tag name.
+// It is local if Remote is an empty string.
+type RefSymbol struct {
+	Name   string
+	Remote string
+}
+
+// ParseRefSymbol parses a limited subset of the revset language
+// for a ref symbol.
+func ParseRefSymbol(s string) (RefSymbol, error) {
+	return parseRefSymbol(s)
+}
+
+func parseRefSymbol[S ~[]byte | ~string](s S) (RefSymbol, error) {
+	p := &parser[S]{s}
+	p.skipWhitespace()
+	refName, err := p.symbol()
+	if err != nil {
+		return RefSymbol{}, fmt.Errorf("parse ref symbol: %v", err)
 	}
-	for i < len(s) {
-		r, size := utf8.DecodeRuneInString(s[i:])
-		i += size
+	var remote S
+	if r, size := decodeRune(p.s); r == '@' {
+		p.advance(size)
+		var err error
+		remote, err = p.symbol()
+		if err != nil {
+			return RefSymbol{}, fmt.Errorf("parse ref symbol: remote: %v", err)
+		}
+	}
+	p.skipWhitespace()
+	if len(p.s) > 0 {
+		return RefSymbol{}, fmt.Errorf("parse ref symbol: trailing characters")
+	}
+	var ref RefSymbol
+	ref.Name, err = Unquote(string(refName))
+	if err != nil {
+		return RefSymbol{}, fmt.Errorf("parse ref symbol: %v", err)
+	}
+	if len(remote) > 0 {
+		var err error
+		ref.Remote, err = Unquote(string(remote))
+		if err != nil {
+			return RefSymbol{}, fmt.Errorf("parse ref symbol: remote: %v", err)
+		}
+	}
+	return ref, nil
+}
+
+// String returns the ref symbol in revset syntax.
+func (ref RefSymbol) String() string {
+	s, err := ref.AppendText(nil)
+	if err != nil {
+		panic(err)
+	}
+	return string(s)
+}
+
+// MarshalText implements [encoding.TextMarshaler]
+// by returning the ref symbol in revset syntax.
+func (ref RefSymbol) MarshalText(dst []byte) ([]byte, error) {
+	return ref.AppendText(nil)
+}
+
+// AppendText implements [encoding.TextAppender]
+// by appending the ref symbol in revset syntax.
+func (ref RefSymbol) AppendText(dst []byte) ([]byte, error) {
+	dst = append(dst, quoteIfNeeded(ref.Name)...)
+	if ref.Remote != "" {
+		dst = append(dst, '@')
+		dst = append(dst, quoteIfNeeded(ref.Remote)...)
+	}
+	return dst, nil
+}
+
+// UnmarshalText implements [encoding.TextUnmarshaler]
+// by parsing the ref symbol in the same revset syntax
+// accepted by [ParseRefSymbol].
+func (ref *RefSymbol) UnmarshalText(text []byte) error {
+	newRef, err := parseRefSymbol(text)
+	if err != nil {
+		return err
+	}
+	*ref = newRef
+	return nil
+}
+
+type parser[S ~string | ~[]byte] struct {
+	s S
+}
+
+func (p *parser[S]) skipWhitespace() {
+	for {
+		r, size := decodeRune(p.s)
+		if size == 0 || !unicode.IsSpace(r) {
+			return
+		}
+		p.s = p.s[size:]
+	}
+}
+
+func (p *parser[S]) advance(n int) S {
+	result := p.s[:n]
+	p.s = p.s[n:]
+	return result
+}
+
+func (p *parser[S]) symbol() (S, error) {
+	token, err := p.stringLiteral()
+	if err == nil || !errors.Is(err, errNoMatch) {
+		return token, err
+	}
+	token, err = p.rawLiteral()
+	if err == nil || !errors.Is(err, errNoMatch) {
+		return token, err
+	}
+	return p.identifier()
+}
+
+func (p *parser[S]) identifier() (S, error) {
+	r, size := decodeRune(p.s)
+	if !IsIdentifierRune(r) {
+		return *new(S), errNoMatch
+	}
+	i := size
+
+	for {
+		r, size := decodeRune(p.s[i:])
+		if size == 0 {
+			return p.advance(i), nil
+		}
 		switch {
 		case r == '.' || r == '+':
-			r, size := utf8.DecodeRuneInString(s[i:])
-			i += size
+			r, size2 := decodeRune(p.s[i+size:])
 			if !IsIdentifierRune(r) {
-				return "", fmt.Errorf("unquote symbol: invalid identifier syntax")
+				return p.advance(i), nil
 			}
+			i += size + size2
 		case r == '-':
 			for {
-				r, size := utf8.DecodeRuneInString(s[i:])
-				i += size
+				r, size2 := decodeRune(p.s[i+size:])
+				size += size2
 				if IsIdentifierRune(r) {
+					i += size
 					break
 				}
 				if r != '-' {
-					return "", fmt.Errorf("unquote symbol: invalid identifier syntax")
+					return p.advance(i), nil
 				}
 			}
 		case !IsIdentifierRune(r):
-			return "", fmt.Errorf("unquote symbol: invalid identifier syntax")
+			return p.advance(i), nil
+		default:
+			i += size
 		}
 	}
-
-	return s, nil
 }
+
+func (p *parser[S]) rawLiteral() (S, error) {
+	r, size := decodeRune(p.s)
+	if r != '\'' {
+		return *new(S), errNoMatch
+	}
+	i := size
+	for {
+		r, size := decodeRune(p.s[i:])
+		i += size
+		if size == 0 {
+			result := p.s
+			p.s = *new(S)
+			return result, errors.New("unterminated single-quoted string")
+		}
+		if r == '\'' {
+			return p.advance(i), nil
+		}
+	}
+}
+
+func (p *parser[S]) stringLiteral() (S, error) {
+	r, size := decodeRune(p.s)
+	if r != '"' {
+		return *new(S), errNoMatch
+	}
+	i := size
+	for {
+		r, size := decodeRune(p.s[i:])
+		i += size
+		switch {
+		case size == 0:
+			result := p.s
+			p.s = *new(S)
+			return result, errors.New("unterminated double-quoted string")
+		case r == '\\':
+			_, size := decodeRune(p.s[i:])
+			if size == 0 {
+				result := p.s
+				p.s = *new(S)
+				return result, errors.New("unterminated double-quoted string")
+			}
+			i += size
+		case r == '"':
+			return p.advance(i), nil
+		}
+	}
+}
+
+var errNoMatch = errors.New("no match")
 
 // IsIdentifierRune reports whether c can be used in a revset identifier.
 func IsIdentifierRune(c rune) bool {
@@ -192,6 +378,12 @@ var (
 		unicode.Pattern_White_Space,
 	}
 )
+
+func decodeRune[S ~[]byte | ~string](s S) (r rune, size int) {
+	var buf [utf8.UTFMax]byte
+	n := copy(buf[:], s)
+	return utf8.DecodeRune(buf[:n])
+}
 
 func hexDigit(c byte) (byte, bool) {
 	switch {
