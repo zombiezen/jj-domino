@@ -126,21 +126,21 @@ func (c *submitCmd) Run(ctx context.Context) error {
 			if i == 0 {
 				prBase = trunkRefSymbol.Name
 			} else {
-				prBase = stack[i-1].bookmarkName
+				prBase = stack[i-1].name
 			}
-			fmt.Printf("%s    %s ← %s\n", pr.commit.ChangeID.Short(), prBase, pr.bookmarkName)
+			fmt.Printf("%s    %s ← %s\n", pr.commit.ChangeID.Short(), prBase, pr.name)
 		}
 	} else {
 		fmt.Printf("%s    %s:%s ← %s:%s\n",
 			stack[0].commit.ChangeID.Short(),
 			baseRepo.Owner, trunkRefSymbol.Name,
-			headRepo.Owner, stack[0].bookmarkName,
+			headRepo.Owner, stack[0].name,
 		)
 		for _, pr := range stack {
 			fmt.Printf("%s    %s:%s ← %s:%s (draft)\n",
 				pr.commit.ChangeID.Short(),
 				baseRepo.Owner, trunkRefSymbol.Name,
-				headRepo.Owner, pr.bookmarkName,
+				headRepo.Owner, pr.name,
 			)
 		}
 	}
@@ -151,15 +151,15 @@ func (c *submitCmd) Run(ctx context.Context) error {
 	return nil
 }
 
-type intendedPR struct {
-	bookmarkName string
-	commit       *jujutsu.Commit
+type localCommitRef struct {
+	name   string
+	commit *jujutsu.Commit
 }
 
-func stackForBookmark(ctx context.Context, jj *jujutsu.Jujutsu, bookmarks []*jujutsu.Bookmark, bookmark string) ([]intendedPR, error) {
+func stackForBookmark(ctx context.Context, jj *jujutsu.Jujutsu, bookmarks []*jujutsu.Bookmark, bookmark string) ([]localCommitRef, error) {
 	type stackFrame struct {
 		curr  *jujutsu.Commit
-		trail []intendedPR
+		trail []localCommitRef
 	}
 
 	i := slices.IndexFunc(bookmarks, func(b *jujutsu.Bookmark) bool {
@@ -188,9 +188,9 @@ func stackForBookmark(ctx context.Context, jj *jujutsu.Jujutsu, bookmarks []*juj
 		return nil, fmt.Errorf("compute stack for %q: commit %v is ancestor of trunk()", bookmark, headCommitID)
 	}
 
-	stack := []intendedPR{{
-		bookmarkName: bookmark,
-		commit:       headCommit,
+	stack := []localCommitRef{{
+		name:   bookmark,
+		commit: headCommit,
 	}}
 	visited := make(map[string]struct{})
 	var resultError error
@@ -215,9 +215,9 @@ func stackForBookmark(ctx context.Context, jj *jujutsu.Jujutsu, bookmarks []*juj
 			}
 			switch {
 			case len(names) == 1:
-				stack = append(stack, intendedPR{
-					bookmarkName: names[0],
-					commit:       c,
+				stack = append(stack, localCommitRef{
+					name:   names[0],
+					commit: c,
 				})
 			case len(names) > 1:
 				resultError = errors.Join(resultError, fmt.Errorf("commit %v has multiple bookmarks", id))
