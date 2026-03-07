@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/shurcooL/githubv4"
 	"zombiezen.com/go/jj-domino/internal/jujutsu"
 )
 
@@ -220,4 +221,41 @@ func findJJExecutable(tb testing.TB) string {
 		tb.Skip("Cannot find Jujutsu:", err)
 	}
 	return exe
+}
+
+func TestFormatPRNumber(t *testing.T) {
+	tests := []struct {
+		n     githubv4.Int
+		width int
+		want  string
+	}{
+		{1, 1, "#1"},
+		{2, 1, "#2"},
+		{1, 2, " #1"},
+		{123, 3, "#123"},
+		{123, 1, "#123"},
+		{123, 5, "  #123"},
+	}
+
+	for _, test := range tests {
+		if got := formatPRNumber(test.n, test.width); got != test.want {
+			t.Errorf("formatPRNumber(%d, %d) = %q; want %q", test.n, test.width, got, test.want)
+		}
+	}
+}
+
+func TestPRNumberPlaceholder(t *testing.T) {
+	tests := []struct {
+		width int
+		want  string
+	}{
+		{1, "#X"},
+		{3, "#XXX"},
+	}
+
+	for _, test := range tests {
+		if got := prNumberPlaceholder(test.width); got != test.want {
+			t.Errorf("prNumberPlaceholder(%d) = %q; want %q", test.width, got, test.want)
+		}
+	}
 }
