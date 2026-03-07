@@ -22,7 +22,10 @@
 
 package jujutsu
 
-import "strings"
+import (
+	"strings"
+	"unicode"
+)
 
 // Quote escapes a string as a revset or templating [string literal].
 //
@@ -33,22 +36,23 @@ func Quote(s string) string {
 	sb := new(strings.Builder)
 	sb.Grow(len(s) + len(`""`))
 	sb.WriteString(`"`)
-	for _, c := range []byte(s) {
+	for _, c := range s {
 		switch {
 		case c == '\\' || c == '"':
 			sb.WriteByte('\\')
-			sb.WriteByte(c)
+			sb.WriteByte(byte(c))
 		case c == '\t':
 			sb.WriteString(`\t`)
 		case c == '\r':
 			sb.WriteString(`\r`)
 		case c == '\n':
 			sb.WriteString(`\n`)
-		case 0x20 <= c && c < 0x7f: // Printable.
-			sb.WriteByte(c)
+		case unicode.IsPrint(c):
+			sb.WriteRune(c)
 		default:
+			// See https://github.com/jj-vcs/jj/issues/9041
 			sb.WriteString(`\x`)
-			sb.WriteByte(hexTable[c>>4])
+			sb.WriteByte(hexTable[(c>>4)&0x0f])
 			sb.WriteByte(hexTable[c&0x0f])
 		}
 	}
