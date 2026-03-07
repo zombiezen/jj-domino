@@ -34,25 +34,26 @@ import (
 	"gg-scm.io/pkg/git"
 )
 
-type githubRepositoryPath struct {
+type gitHubRepositoryPath struct {
 	Owner string
 	Repo  string
 }
 
-func gitHubRepositoryForURL(urlstr string) (githubRepositoryPath, error) {
+func gitHubRepositoryForURL(urlstr string) (gitHubRepositoryPath, error) {
 	u, err := git.ParseURL(urlstr)
 	if err != nil {
-		return githubRepositoryPath{}, err
+		return gitHubRepositoryPath{}, err
 	}
 	if u.Host != "github.com" || !(u.Scheme == "https" || u.Scheme == "ssh" && u.User.Username() == "git") {
-		return githubRepositoryPath{}, fmt.Errorf("%s is not a GitHub repository", urlstr)
+		return gitHubRepositoryPath{}, fmt.Errorf("%s is not a GitHub repository", urlstr)
 	}
-	var p githubRepositoryPath
+	var p gitHubRepositoryPath
 	var ok bool
 	p.Owner, p.Repo, ok = strings.Cut(strings.TrimPrefix(u.Path, "/"), "/")
 	if !ok || strings.Contains(p.Repo, "/") {
-		return githubRepositoryPath{}, fmt.Errorf("%s is not a GitHub repository", urlstr)
+		return gitHubRepositoryPath{}, fmt.Errorf("%s is not a GitHub repository", urlstr)
 	}
+	p.Repo = strings.TrimSuffix(p.Repo, ".git")
 	return p, nil
 }
 

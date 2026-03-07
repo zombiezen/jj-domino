@@ -43,10 +43,10 @@ func TestStackForBookmark(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := []intendedPR{
-			{bookmarkName: "foo", commit: commits["foo"]},
+		want := []localCommitRef{
+			{name: "foo", commit: commits["foo"]},
 		}
-		if diff := cmp.Diff(want, got, cmp.AllowUnexported(intendedPR{})); diff != "" {
+		if diff := cmp.Diff(want, got, cmp.AllowUnexported(localCommitRef{})); diff != "" {
 			t.Errorf("stack (-want +got):\n%s", diff)
 		}
 	})
@@ -79,11 +79,11 @@ func TestStackForBookmark(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := []intendedPR{
-			{bookmarkName: "foo", commit: commits["foo"]},
-			{bookmarkName: "bar", commit: commits["bar"]},
+		want := []localCommitRef{
+			{name: "foo", commit: commits["foo"]},
+			{name: "bar", commit: commits["bar"]},
 		}
-		if diff := cmp.Diff(want, got, cmp.AllowUnexported(intendedPR{})); diff != "" {
+		if diff := cmp.Diff(want, got, cmp.AllowUnexported(localCommitRef{})); diff != "" {
 			t.Errorf("stack (-want +got):\n%s", diff)
 		}
 	})
@@ -121,10 +121,10 @@ func TestStackForBookmark(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := []intendedPR{
-			{bookmarkName: "a", commit: commits["a"]},
+		want := []localCommitRef{
+			{name: "a", commit: commits["a"]},
 		}
-		if diff := cmp.Diff(want, got, cmp.AllowUnexported(intendedPR{})); diff != "" {
+		if diff := cmp.Diff(want, got, cmp.AllowUnexported(localCommitRef{})); diff != "" {
 			t.Errorf("stack (-want +got):\n%s", diff)
 		}
 	})
@@ -164,7 +164,7 @@ func TestStackForBookmark(t *testing.T) {
 		if err == nil {
 			names := make([]string, 0, len(got))
 			for _, pr := range got {
-				names = append(names, pr.bookmarkName)
+				names = append(names, pr.name)
 			}
 			t.Error("stackForBookmark did not return an error. Stack: main ←", strings.Join(names, " ← "))
 		}
