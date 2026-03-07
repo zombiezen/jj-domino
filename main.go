@@ -27,9 +27,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"iter"
 	"log"
-	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -54,7 +54,7 @@ type submitCmd struct {
 	DryRun       bool    `short:"n" help:"Don't send to GitHub"`
 }
 
-func (c *submitCmd) Run(ctx context.Context) error {
+func (c *submitCmd) Run(ctx context.Context, k *kong.Kong) error {
 	const defaultPRNumberWidth = 3
 
 	opts := jujutsu.Options{}
@@ -144,7 +144,7 @@ func (c *submitCmd) Run(ctx context.Context) error {
 			pr.writeLogLine(sb)
 			sb.WriteString("\n")
 		}
-		os.Stdout.WriteString(sb.String())
+		io.WriteString(k.Stdout, sb.String())
 		return nil
 	}
 
@@ -212,7 +212,7 @@ func (c *submitCmd) Run(ctx context.Context) error {
 			}
 			sb.WriteString("\n")
 		}
-		os.Stdout.WriteString(sb.String())
+		io.WriteString(k.Stdout, sb.String())
 		return nil
 	}
 
@@ -247,7 +247,7 @@ func (c *submitCmd) Run(ctx context.Context) error {
 		pr.writeLogLine(sb)
 		sb.WriteString(" (new)")
 		sb.WriteString("\n")
-		os.Stdout.WriteString(sb.String())
+		io.WriteString(k.Stdout, sb.String())
 	}
 
 	// Now go through and update all the pull requests in the stack with the footer
@@ -267,7 +267,7 @@ func (c *submitCmd) Run(ctx context.Context) error {
 			sb.WriteString(": ")
 			pr.writeLogLine(sb)
 			sb.WriteString("\n")
-			os.Stdout.WriteString(sb.String())
+			io.WriteString(k.Stdout, sb.String())
 		}
 	}
 
@@ -464,7 +464,7 @@ func stackForBookmark(ctx context.Context, jj *jujutsu.Jujutsu, bookmarks []*juj
 
 type doctorCmd struct{}
 
-func (c *doctorCmd) Run(ctx context.Context) error {
+func (c *doctorCmd) Run(ctx context.Context, k *kong.Kong) error {
 	token, err := gitHubToken(ctx)
 	if err != nil {
 		return err
@@ -482,7 +482,7 @@ func (c *doctorCmd) Run(ctx context.Context) error {
 		return err
 	}
 
-	fmt.Printf("Authenticated as: %s\n", query.Viewer.Login)
+	fmt.Fprintf(k.Stdout, "Authenticated as: %s\n", query.Viewer.Login)
 	return nil
 }
 
