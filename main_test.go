@@ -40,7 +40,7 @@ func TestStackForBookmark(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		got, err := stackForBookmark(ctx, jj, bookmarks, "foo")
+		got, err := stackForBookmark(ctx, jj, bookmarks, jujutsu.RefSymbol{Name: "main"}, "foo")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -76,7 +76,7 @@ func TestStackForBookmark(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		got, err := stackForBookmark(ctx, jj, bookmarks, "bar")
+		got, err := stackForBookmark(ctx, jj, bookmarks, jujutsu.RefSymbol{Name: "main"}, "bar")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -118,7 +118,7 @@ func TestStackForBookmark(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		got, err := stackForBookmark(ctx, jj, bookmarks, "a")
+		got, err := stackForBookmark(ctx, jj, bookmarks, jujutsu.RefSymbol{Name: "main"}, "a")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -161,7 +161,7 @@ func TestStackForBookmark(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		got, err := stackForBookmark(ctx, jj, bookmarks, "a")
+		got, err := stackForBookmark(ctx, jj, bookmarks, jujutsu.RefSymbol{Name: "main"}, "a")
 		if err == nil {
 			names := make([]string, 0, len(got))
 			for _, pr := range got {
@@ -177,9 +177,6 @@ func createRepository(ctx context.Context, jj *jujutsu.Jujutsu) error {
 		return err
 	}
 	if err := jj.SetBookmark(ctx, []string{"main"}, jujutsu.SetBookmarkOptions{}); err != nil {
-		return err
-	}
-	if err := jj.SetRepositorySetting(ctx, `revset-aliases."trunk()"`, "main"); err != nil {
 		return err
 	}
 	return nil
