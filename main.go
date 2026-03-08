@@ -54,6 +54,7 @@ type submitCmd struct {
 	Changes   []string `kong:"name=change,short=c,sep=none,help=Push stacks by creating bookmarks (can be repeated),placeholder=REVSETS,xor=revisions"`
 	Draft     bool     `kong:"short=d,help=Mark base pull request as draft"`
 	DryRun    bool     `kong:"short=n,help=Don\\'t send to GitHub"`
+	Base      string   `kong:"help=Base remote bookmark to open pull requests against (defaults to trunk()),placeholder=BOOKMARK@REMOTE"`
 	Push      bool     `kong:"negatable,help=Push to GitHub (on by default),default=true"`
 }
 
@@ -82,8 +83,32 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong) error {
 	if c.DryRun {
 		pushOutput = k.Stdout
 	}
+	var baseRef jujutsu.RefSymbol
+	if c.Base != "" {
+		var err error
+		baseRef, err = jujutsu.ParseRefSymbol(c.Base)
+		if err != nil {
+			return fmt.Errorf("--base: %v", err)
+		}
+		if baseRef.Remote == "" {
+			return fmt.Errorf("--base=%s does not have an associated remote", c.Base)
+		}
+	} else {
+		var trunkRevset string
+		if err := jsonv2.Unmarshal(jjSettings[`revset-aliases."trunk()"`], &trunkRevset); err != nil {
+			return fmt.Errorf("trunk: %v", err)
+		}
+		var err error
+		baseRef, err = jujutsu.ParseRefSymbol(trunkRevset)
+		if err != nil {
+			return fmt.Errorf("trunk %q: %v", trunkRevset, err)
+		}
+		if baseRef.Remote == "" {
+			return fmt.Errorf("trunk() does not have an associated remote")
+		}
+	}
 
-	bookmarks, headBookmark, err := c.determineStackHead(ctx, jj, pushRemoteName, pushOutput)
+	bookmarks, headBookmark, err := c.determineStackHead(ctx, jj, baseRef, pushRemoteName, pushOutput)
 	if err != nil {
 		return err
 	}
@@ -93,21 +118,9 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong) error {
 		return nil
 	}
 
-	stack, err := stackForBookmark(ctx, jj, bookmarks, headBookmark)
+	stack, err := stackForBookmark(ctx, jj, bookmarks, baseRef, headBookmark)
 	if err != nil {
 		return err
-	}
-
-	var trunkRevset string
-	if err := jsonv2.Unmarshal(jjSettings[`revset-aliases."trunk()"`], &trunkRevset); err != nil {
-		return fmt.Errorf("trunk: %v", err)
-	}
-	trunkRefSymbol, err := jujutsu.ParseRefSymbol(trunkRevset)
-	if err != nil {
-		return fmt.Errorf("trunk %q: %v", trunkRevset, err)
-	}
-	if trunkRefSymbol.Remote == "" {
-		return fmt.Errorf("trunk() does not have an associated remote")
 	}
 
 	gitRoot, err := jj.GitRoot(ctx)
@@ -123,13 +136,13 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong) error {
 		return err
 	}
 	remotes := gitConfig.ListRemotes()
-	baseRemote := remotes[trunkRefSymbol.Remote]
+	baseRemote := remotes[baseRef.Remote]
 	if baseRemote == nil {
-		return fmt.Errorf("unknown remote %s from trunk()", trunkRefSymbol.Remote)
+		return fmt.Errorf("unknown remote %s from base", baseRef.Remote)
 	}
 	baseRepoPath, err := gitHubRepositoryForURL(baseRemote.FetchURL)
 	if err != nil {
-		return fmt.Errorf("trunk() remote: %v", err)
+		return fmt.Errorf("base remote: %v", err)
 	}
 	pushRemote := remotes[pushRemoteName]
 	if pushRemote == nil {
@@ -149,7 +162,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong) error {
 		// We can still display the proposed PRs.
 		log.Printf("Unable to authenticate to GitHub: %v", err)
 
-		plan := planPullRequests(baseRepoPath, trunkRefSymbol.Name, placeholderGitHubRepository(headRepoPath), stack)
+		plan := planPullRequests(baseRepoPath, baseRef.Name, placeholderGitHubRepository(headRepoPath), stack)
 		plan[0].IsDraft = githubv4.Boolean(c.Draft)
 		sb := new(strings.Builder)
 		for _, pr := range plan {
@@ -178,7 +191,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong) error {
 		}
 	}
 
-	plan := planPullRequests(baseRepoPath, trunkRefSymbol.Name, headRepo, stack)
+	plan := planPullRequests(baseRepoPath, baseRef.Name, headRepo, stack)
 	plan[0].IsDraft = githubv4.Boolean(c.Draft)
 
 	var baseRepo *gitHubRepository
@@ -298,7 +311,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong) error {
 	return nil
 }
 
-func (c *submitCmd) determineStackHead(ctx context.Context, jj *jujutsu.Jujutsu, pushRemoteName string, pushOutput io.Writer) (bookmarks []*jujutsu.Bookmark, headBookmark string, err error) {
+func (c *submitCmd) determineStackHead(ctx context.Context, jj *jujutsu.Jujutsu, baseRef jujutsu.RefSymbol, pushRemoteName string, pushOutput io.Writer) (bookmarks []*jujutsu.Bookmark, headBookmark string, err error) {
 	if c.Bookmark != "" {
 		var err error
 		bookmarks, err = jj.ListBookmarks(ctx)
@@ -308,7 +321,7 @@ func (c *submitCmd) determineStackHead(ctx context.Context, jj *jujutsu.Jujutsu,
 	var head *jujutsu.Commit
 	if c.shouldCreatePushBookmarks() {
 		var err error
-		head, err = c.pushChanges(ctx, jj, pushRemoteName, pushOutput)
+		head, err = c.pushChanges(ctx, jj, baseRef, pushRemoteName, pushOutput)
 		if err != nil {
 			return nil, "", err
 		}
@@ -318,7 +331,7 @@ func (c *submitCmd) determineStackHead(ctx context.Context, jj *jujutsu.Jujutsu,
 		}
 	} else {
 		var err error
-		head, err = c.findStackHeadFromRevisions(ctx, jj)
+		head, err = c.findStackHeadFromRevisions(ctx, jj, baseRef)
 		if err != nil {
 			return nil, "", err
 		}
@@ -343,12 +356,12 @@ func (c *submitCmd) shouldCreatePushBookmarks() bool {
 
 // pushChanges runs "jj git push -c c.Changes"
 // and returns the head commit from the revset defined by c.Changes.
-func (c *submitCmd) pushChanges(ctx context.Context, jj *jujutsu.Jujutsu, pushRemoteName string, pushOutput io.Writer) (*jujutsu.Commit, error) {
+func (c *submitCmd) pushChanges(ctx context.Context, jj *jujutsu.Jujutsu, baseRef jujutsu.RefSymbol, pushRemoteName string, pushOutput io.Writer) (*jujutsu.Commit, error) {
 	revset := joinRevsets(c.Changes)
-	if hasBase, err := isNonEmptyRevset(ctx, jj, revset+" & ::trunk()"); err != nil {
-		return nil, fmt.Errorf("check for overlaps with trunk: %v", err)
+	if hasBase, err := isNonEmptyRevset(ctx, jj, revset+" & ::"+baseRef.String()); err != nil {
+		return nil, fmt.Errorf("check for overlaps with %v: %v", baseRef, err)
 	} else if hasBase {
-		return nil, fmt.Errorf("changes overlap with trunk")
+		return nil, fmt.Errorf("changes overlap with %v", baseRef)
 	}
 	// Validate once without doing a network call.
 	headRevset := "heads(" + revset + ")"
@@ -386,10 +399,12 @@ func (c *submitCmd) pushChanges(ctx context.Context, jj *jujutsu.Jujutsu, pushRe
 }
 
 // findStackHeadFromRevisions returns the head commit from c.Revisions.
-func (c *submitCmd) findStackHeadFromRevisions(ctx context.Context, jj *jujutsu.Jujutsu) (*jujutsu.Commit, error) {
-	revset := "(trunk()..@)"
+func (c *submitCmd) findStackHeadFromRevisions(ctx context.Context, jj *jujutsu.Jujutsu, baseRef jujutsu.RefSymbol) (*jujutsu.Commit, error) {
+	var revset string
 	if len(c.Revisions) > 0 {
 		revset = joinRevsets(c.Revisions)
+	} else {
+		revset = "(" + baseRef.String() + "..@)"
 	}
 	var err error
 	head, err := singleCommitRevset(ctx, jj, "heads(bookmarks() & "+revset+")")
@@ -475,7 +490,7 @@ func planPullRequests(baseRepoPath gitHubRepositoryPath, baseRefName string, hea
 		var prBase string
 		if i == 0 || isFork {
 			// A pull request's base ref must be in the pull request's repository.
-			// If we're pulling from a fork, then always use the trunk.
+			// If we're pulling from a fork, then always use the base ref.
 			prBase = baseRefName
 		} else {
 			prBase = stack[i-1].name
@@ -594,7 +609,7 @@ type localCommitRef struct {
 	commit *jujutsu.Commit
 }
 
-func stackForBookmark(ctx context.Context, jj *jujutsu.Jujutsu, bookmarks []*jujutsu.Bookmark, bookmark string) ([]localCommitRef, error) {
+func stackForBookmark(ctx context.Context, jj *jujutsu.Jujutsu, bookmarks []*jujutsu.Bookmark, baseRef jujutsu.RefSymbol, bookmark string) ([]localCommitRef, error) {
 	type stackFrame struct {
 		curr  *jujutsu.Commit
 		trail []localCommitRef
@@ -612,7 +627,7 @@ func stackForBookmark(ctx context.Context, jj *jujutsu.Jujutsu, bookmarks []*juj
 		return nil, fmt.Errorf("compute stack for %q: unresolved bookmark", bookmark)
 	}
 
-	revset := "trunk().." + headCommitID.String()
+	revset := baseRef.String() + ".." + headCommitID.String()
 	changes := make(map[string]*jujutsu.Commit)
 	err := jj.Log(ctx, revset, func(c *jujutsu.Commit) bool {
 		changes[string(c.ID)] = c
@@ -623,7 +638,7 @@ func stackForBookmark(ctx context.Context, jj *jujutsu.Jujutsu, bookmarks []*juj
 	}
 	headCommit := changes[string(headCommitID)]
 	if headCommit == nil {
-		return nil, fmt.Errorf("compute stack for %q: commit %v is ancestor of trunk()", bookmark, headCommitID)
+		return nil, fmt.Errorf("compute stack for %q: commit %v is ancestor of %v", bookmark, headCommitID, baseRef)
 	}
 
 	stack := []localCommitRef{{
@@ -642,7 +657,7 @@ func stackForBookmark(ctx context.Context, jj *jujutsu.Jujutsu, bookmarks []*juj
 
 			c := changes[string(id)]
 			if c == nil {
-				// Trunk or trunk ancestor.
+				// Base ref or base ref ancestor.
 				continue
 			}
 			if name, err := nameForCommit(bookmarks, id); err != nil && !isNoBookmarksError(err) {
