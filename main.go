@@ -38,6 +38,7 @@ import (
 	"gg-scm.io/pkg/git"
 	"github.com/alecthomas/kong"
 	jsonv2 "github.com/go-json-experiment/json"
+	"github.com/go-json-experiment/json/jsontext"
 	"github.com/shurcooL/githubv4"
 	"golang.org/x/term"
 	"zombiezen.com/go/jj-domino/internal/jujutsu"
@@ -54,6 +55,7 @@ type submitCmd struct {
 	Changes   []string `kong:"name=change,short=c,sep=none,help=Push stacks by creating bookmarks (can be repeated),placeholder=REVSETS,xor=revisions"`
 	Draft     bool     `kong:"short=d,help=Mark first pull request in stack as draft"`
 	DryRun    bool     `kong:"short=n,help=Don\\'t send to GitHub"`
+	Remote    string   `kong:"help=The remote to push to,placeholder=REMOTE"`
 	Base      string   `kong:"help=Base remote bookmark to open pull requests against (default: trunk()),placeholder=BOOKMARK@REMOTE"`
 	Push      bool     `kong:"negatable,help=Push commits to GitHub (on by default),default=true"`
 }
@@ -69,14 +71,25 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong) error {
 	if err != nil {
 		return err
 	}
-	jjSettings, err := jj.ReadSettings(ctx)
-	if err != nil {
-		return err
+	var jjSettings map[string]jsontext.Value
+	if c.Remote == "" || c.Base == "" {
+		// If the user fully specifies the base ref and remote,
+		// we do not need to read Jujutsu's settings.
+		// But in most cases, we need to.
+		var err error
+		jjSettings, err = jj.ReadSettings(ctx)
+		if err != nil {
+			return err
+		}
 	}
-	pushRemoteName := "origin"
-	if pushSetting := jjSettings["git.push"]; len(pushSetting) > 0 {
-		if err := jsonv2.Unmarshal(pushSetting, &pushRemoteName); err != nil {
-			return fmt.Errorf("git.push: %v", err)
+	pushRemoteName := c.Remote
+	if pushRemoteName == "" {
+		if pushSetting := jjSettings["git.push"]; len(pushSetting) > 0 {
+			if err := jsonv2.Unmarshal(pushSetting, &pushRemoteName); err != nil {
+				return fmt.Errorf("git.push: %v", err)
+			}
+		} else {
+			pushRemoteName = "origin"
 		}
 	}
 	pushOutput := k.Stderr
