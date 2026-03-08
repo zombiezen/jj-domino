@@ -51,6 +51,7 @@ type cli struct {
 type submitCmd struct {
 	Bookmark  string   `kong:"short=b,help=Bookmark to send,placeholder=NAME,xor=revisions"`
 	Revisions []string `kong:"short=r,sep=none,help=Push stacks pointing to these commits (can be repeated),placeholder=REVSETS,xor=revisions"`
+	Changes   []string `kong:"name=change,short=c,sep=none,help=Push stacks by creating bookmarks (can be repeated),placeholder=REVSETS,xor=revisions"`
 	Draft     bool     `kong:"short=d,help=Mark base pull request as draft"`
 	DryRun    bool     `kong:"short=n,help=Don\\'t send to GitHub"`
 	Push      bool     `kong:"negatable,help=Push to GitHub (on by default),default=true"`
@@ -59,46 +60,37 @@ type submitCmd struct {
 func (c *submitCmd) Run(ctx context.Context, k *kong.Kong) error {
 	const defaultPRNumberWidth = 3
 
-	opts := jujutsu.Options{}
-	jj, err := jujutsu.New(opts)
-	if err != nil {
-		return err
-	}
-	bookmarks, err := jj.ListBookmarks(ctx)
-	if err != nil {
-		return err
+	if c.shouldCreatePushBookmarks() && !c.Push {
+		return fmt.Errorf("cannot combine --no-push with --change")
 	}
 
-	headBookmark := c.Bookmark
+	jj, err := jujutsu.New(jujutsu.Options{})
+	if err != nil {
+		return err
+	}
+	jjSettings, err := jj.ReadSettings(ctx)
+	if err != nil {
+		return err
+	}
+	pushRemoteName := "origin"
+	if pushSetting := jjSettings["git.push"]; len(pushSetting) > 0 {
+		if err := jsonv2.Unmarshal(pushSetting, &pushRemoteName); err != nil {
+			return fmt.Errorf("git.push: %v", err)
+		}
+	}
+	pushOutput := k.Stderr
+	if c.DryRun {
+		pushOutput = k.Stdout
+	}
+
+	bookmarks, headBookmark, err := c.determineStackHead(ctx, jj, pushRemoteName, pushOutput)
+	if err != nil {
+		return err
+	}
 	if headBookmark == "" {
-		revset := "(trunk()..@)"
-		if len(c.Revisions) > 0 {
-			revset = joinRevsets(c.Revisions)
-		}
-		revset = "heads(bookmarks() & " + revset + ")"
-		var head *jujutsu.Commit
-		multiple := false
-		err := jj.Log(ctx, revset, func(c *jujutsu.Commit) bool {
-			if head != nil {
-				multiple = true
-				return false
-			}
-			head = c
-			return true
-		})
-		if err != nil {
-			return fmt.Errorf("find stack head: %v", err)
-		}
-		if multiple {
-			return fmt.Errorf("find stack head: multiple found")
-		}
-		if head == nil {
-			return fmt.Errorf("find stack head: no bookmarks found")
-		}
-		headBookmark, err = nameForCommit(bookmarks, head.ID)
-		if err != nil {
-			return fmt.Errorf("find stack head: %v", err)
-		}
+		// We don't have a head bookmark (jj-domino submit --change REVSET --dry-run),
+		// so exit now.
+		return nil
 	}
 
 	stack, err := stackForBookmark(ctx, jj, bookmarks, headBookmark)
@@ -106,12 +98,8 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong) error {
 		return err
 	}
 
-	cfg, err := jj.ReadSettings(ctx)
-	if err != nil {
-		return err
-	}
 	var trunkRevset string
-	if err := jsonv2.Unmarshal(cfg[`revset-aliases."trunk()"`], &trunkRevset); err != nil {
+	if err := jsonv2.Unmarshal(jjSettings[`revset-aliases."trunk()"`], &trunkRevset); err != nil {
 		return fmt.Errorf("trunk: %v", err)
 	}
 	trunkRefSymbol, err := jujutsu.ParseRefSymbol(trunkRevset)
@@ -120,12 +108,6 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong) error {
 	}
 	if trunkRefSymbol.Remote == "" {
 		return fmt.Errorf("trunk() does not have an associated remote")
-	}
-	pushRemoteName := "origin"
-	if pushSetting := cfg["git.push"]; len(pushSetting) > 0 {
-		if err := jsonv2.Unmarshal(pushSetting, &pushRemoteName); err != nil {
-			return fmt.Errorf("git.push: %v", err)
-		}
 	}
 
 	gitRoot, err := jj.GitRoot(ctx)
@@ -222,27 +204,16 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong) error {
 
 	isStdoutTerminal := isTerminal(k.Stdout)
 
-	if c.Push {
-		pushOutput := k.Stderr
-		pushArgs := []string{"git", "push"}
-		if c.DryRun {
-			pushArgs = append(pushArgs, "--dry-run")
-			pushOutput = k.Stdout
-		}
-		pushArgs = append(pushArgs, "--remote="+pushRemoteName)
-		for _, pr := range plan {
-			pushArgs = append(pushArgs, "--bookmark=exact:"+jujutsu.Quote(string(pr.HeadRefName)))
-		}
-		if c.DryRun {
-			fmt.Fprintf(k.Stdout, "%% jj %s\n", strings.Join(pushArgs, " "))
-		}
-		err := jj.RunJJ(ctx, &jujutsu.Invocation{
-			Args:   pushArgs,
-			Stdout: pushOutput,
-			Stderr: pushOutput,
+	if c.Push && !c.shouldCreatePushBookmarks() {
+		err := jjGitPush(ctx, jj, pushOutput, c.DryRun, pushRemoteName, func(yield func(string) bool) {
+			for _, pr := range plan {
+				if !yield("--bookmark=exact:" + jujutsu.Quote(string(pr.HeadRefName))) {
+					return
+				}
+			}
 		})
-		if err != nil && !c.DryRun {
-			return fmt.Errorf("jj git push --remote=%s: %v", pushRemoteName, err)
+		if err != nil {
+			return err
 		}
 		io.WriteString(pushOutput, "\n")
 	}
@@ -324,6 +295,171 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong) error {
 		}
 	}
 
+	return nil
+}
+
+func (c *submitCmd) determineStackHead(ctx context.Context, jj *jujutsu.Jujutsu, pushRemoteName string, pushOutput io.Writer) (bookmarks []*jujutsu.Bookmark, headBookmark string, err error) {
+	if c.Bookmark != "" {
+		var err error
+		bookmarks, err = jj.ListBookmarks(ctx)
+		return bookmarks, c.Bookmark, err
+	}
+
+	var head *jujutsu.Commit
+	if c.shouldCreatePushBookmarks() {
+		var err error
+		head, err = c.pushChanges(ctx, jj, pushRemoteName, pushOutput)
+		if err != nil {
+			return nil, "", err
+		}
+		if c.DryRun {
+			// Bookmarks haven't been created, so we can't get the name.
+			return nil, "", nil
+		}
+	} else {
+		var err error
+		head, err = c.findStackHeadFromRevisions(ctx, jj)
+		if err != nil {
+			return nil, "", err
+		}
+	}
+
+	// List bookmarks after potentially pushing changes.
+	bookmarks, err = jj.ListBookmarks(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	headBookmark, err = nameForCommit(bookmarks, head.ID)
+	if err != nil {
+		return bookmarks, "", fmt.Errorf("find stack head: %v", err)
+	}
+	return bookmarks, headBookmark, nil
+}
+
+// shouldCreatePushBookmarks reports whether the options indicate whether "jj git push -c" will be run.
+func (c *submitCmd) shouldCreatePushBookmarks() bool {
+	return c.Bookmark == "" && len(c.Changes) > 0
+}
+
+// pushChanges runs "jj git push -c c.Changes"
+// and returns the head commit from the revset defined by c.Changes.
+func (c *submitCmd) pushChanges(ctx context.Context, jj *jujutsu.Jujutsu, pushRemoteName string, pushOutput io.Writer) (*jujutsu.Commit, error) {
+	revset := joinRevsets(c.Changes)
+	if hasBase, err := isNonEmptyRevset(ctx, jj, revset+" & ::trunk()"); err != nil {
+		return nil, fmt.Errorf("check for overlaps with trunk: %v", err)
+	} else if hasBase {
+		return nil, fmt.Errorf("changes overlap with trunk")
+	}
+	// Validate once without doing a network call.
+	headRevset := "heads(" + revset + ")"
+	head, err := singleCommitRevset(ctx, jj, headRevset)
+	if err != nil {
+		if errors.Is(err, errEmptyRevset) {
+			err = errors.New("no changes found")
+		}
+		return nil, fmt.Errorf("find stack head: %v", err)
+	}
+
+	err = jjGitPush(ctx, jj, pushOutput, c.DryRun, pushRemoteName, func(yield func(string) bool) {
+		yield("--change=" + revset)
+	})
+	if err != nil {
+		return nil, err
+	}
+	if c.DryRun {
+		return head, nil
+	}
+
+	// Add blank line to separate pull request output.
+	io.WriteString(pushOutput, "\n")
+
+	// We need to repeat this after the push in case the commit ID changed.
+	head, err = singleCommitRevset(ctx, jj, headRevset)
+	if err != nil {
+		if errors.Is(err, errEmptyRevset) {
+			err = errors.New("no changes found")
+		}
+		return nil, fmt.Errorf("find stack head: %v", err)
+	}
+
+	return head, nil
+}
+
+// findStackHeadFromRevisions returns the head commit from c.Revisions.
+func (c *submitCmd) findStackHeadFromRevisions(ctx context.Context, jj *jujutsu.Jujutsu) (*jujutsu.Commit, error) {
+	revset := "(trunk()..@)"
+	if len(c.Revisions) > 0 {
+		revset = joinRevsets(c.Revisions)
+	}
+	var err error
+	head, err := singleCommitRevset(ctx, jj, "heads(bookmarks() & "+revset+")")
+	if err != nil {
+		if errors.Is(err, errEmptyRevset) {
+			err = errors.New("no bookmarks found")
+		}
+		return nil, fmt.Errorf("find stack head: %v", err)
+	}
+	return head, nil
+}
+
+// singleCommitRevset fetches the single commit the revset matches
+// or returns an error if the revset does not match exactly one commit.
+func singleCommitRevset(ctx context.Context, jj *jujutsu.Jujutsu, revset string) (*jujutsu.Commit, error) {
+	var result *jujutsu.Commit
+	multiple := false
+	err := jj.Log(ctx, revset, func(c *jujutsu.Commit) bool {
+		if result != nil {
+			multiple = true
+			return false
+		}
+		result = c
+		return true
+	})
+	if err != nil {
+		return nil, err
+	}
+	if multiple {
+		return nil, errors.New("multiple found")
+	}
+	if result == nil {
+		return nil, errEmptyRevset
+	}
+	return result, nil
+}
+
+// isNonEmptyRevset reports whether the revset matches at least one commit.
+func isNonEmptyRevset(ctx context.Context, jj *jujutsu.Jujutsu, revset string) (bool, error) {
+	nonEmpty := false
+	err := jj.Log(ctx, revset, func(c *jujutsu.Commit) bool {
+		nonEmpty = true
+		return false
+	})
+	return nonEmpty, err
+}
+
+// errEmptyRevset is the error returned by [singleCommitRevset]
+// when the revset does not match any commits.
+var errEmptyRevset = errors.New("revset empty")
+
+// jjGitPush runs the `jj git push` command.
+func jjGitPush(ctx context.Context, jj *jujutsu.Jujutsu, w io.Writer, dryRun bool, pushRemoteName string, extraArgs iter.Seq[string]) error {
+	pushArgs := []string{"git", "push"}
+	if dryRun {
+		pushArgs = append(pushArgs, "--dry-run")
+	}
+	pushArgs = append(pushArgs, "--remote="+pushRemoteName)
+	pushArgs = slices.AppendSeq(pushArgs, extraArgs)
+	if dryRun {
+		fmt.Fprintf(w, "%% jj %s\n", strings.Join(pushArgs, " "))
+	}
+	err := jj.RunJJ(ctx, &jujutsu.Invocation{
+		Args:   pushArgs,
+		Stdout: w,
+		Stderr: w,
+	})
+	if err != nil && !dryRun {
+		return fmt.Errorf("jj git push --remote=%s: %v", pushRemoteName, err)
+	}
 	return nil
 }
 
