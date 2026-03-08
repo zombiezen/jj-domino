@@ -49,13 +49,13 @@ type cli struct {
 }
 
 type submitCmd struct {
-	Bookmark  string   `kong:"short=b,help=Bookmark to send,placeholder=NAME,xor=revisions"`
-	Revisions []string `kong:"short=r,sep=none,help=Push stacks pointing to these commits (can be repeated),placeholder=REVSETS,xor=revisions"`
+	Bookmark  string   `kong:"short=b,help=Push a stack with the bookmark as the head,placeholder=NAME,xor=revisions"`
+	Revisions []string `kong:"short=r,sep=none,help=Push stacks pointing to these commits (can be repeated) (default: trunk()..@),placeholder=REVSETS,xor=revisions"`
 	Changes   []string `kong:"name=change,short=c,sep=none,help=Push stacks by creating bookmarks (can be repeated),placeholder=REVSETS,xor=revisions"`
-	Draft     bool     `kong:"short=d,help=Mark base pull request as draft"`
+	Draft     bool     `kong:"short=d,help=Mark first pull request in stack as draft"`
 	DryRun    bool     `kong:"short=n,help=Don\\'t send to GitHub"`
-	Base      string   `kong:"help=Base remote bookmark to open pull requests against (defaults to trunk()),placeholder=BOOKMARK@REMOTE"`
-	Push      bool     `kong:"negatable,help=Push to GitHub (on by default),default=true"`
+	Base      string   `kong:"help=Base remote bookmark to open pull requests against (default: trunk()),placeholder=BOOKMARK@REMOTE"`
+	Push      bool     `kong:"negatable,help=Push commits to GitHub (on by default),default=true"`
 }
 
 func (c *submitCmd) Run(ctx context.Context, k *kong.Kong) error {
