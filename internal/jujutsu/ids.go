@@ -118,6 +118,10 @@ func (id *ChangeID) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 	switch dec.PeekKind() {
 	case jsontext.KindNull:
 		*id = nil
+		// Consume null token. Should never error.
+		if _, err := dec.ReadToken(); err != nil {
+			return fmt.Errorf("unmarshal change ID: %v", err)
+		}
 	case jsontext.KindString:
 		tok, err := dec.ReadToken()
 		if err != nil {
@@ -231,6 +235,10 @@ func (id *CommitID) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 	switch dec.PeekKind() {
 	case jsontext.KindNull:
 		*id = nil
+		// Consume null token. Should never error.
+		if _, err := dec.ReadToken(); err != nil {
+			return fmt.Errorf("unmarshal commit ID: %v", err)
+		}
 	case jsontext.KindString:
 		tok, err := dec.ReadToken()
 		if err != nil {
