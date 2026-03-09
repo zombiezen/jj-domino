@@ -32,7 +32,7 @@ Changes to push to origin:
 Assuming you already have [Jujutsu][] installed:
 
 1. [Install Go](https://go.dev/dl/)
-2. `go get zombiezen.com/go/jj-domino`
+2. `go install zombiezen.com/go/jj-domino@latest`
 3. Authenticate to GitHub using one of two options:
    - If you're already using the [GitHub CLI][], then run `gh auth login`.
    - Otherwise, [create a personal access token with `repo` scope](https://github.com/settings/tokens/new?scopes=repo)
