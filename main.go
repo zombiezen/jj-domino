@@ -27,23 +27,47 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/exec"
 
 	"github.com/alecthomas/kong"
 	"golang.org/x/term"
 )
 
 type cli struct {
+	lookupEnv lookupEnvFunc `kong:"-"`
+	lookPath  lookPathFunc
+
 	Submit submitCmd `kong:"cmd,default=withargs,help=Submit a review stack"`
 	Doctor doctorCmd `kong:"cmd,help=Verify auth and config settings"`
 }
 
 func main() {
-	ctx := kong.Parse(&cli{}, kong.UsageOnError())
-	ctx.BindTo(context.Background(), (*context.Context)(nil))
-	if err := ctx.Run(); err != nil {
+	c := &cli{
+		lookupEnv: os.LookupEnv,
+		lookPath:  exec.LookPath,
+	}
+	k := kong.Parse(c, kong.UsageOnError())
+	k.BindTo(context.Background(), (*context.Context)(nil))
+	if err := k.Run(); err != nil {
 		log.Fatal(err)
 	}
 }
+
+// A lookupEnvFunc is a function that retrieves environment variables by key.
+// The de facto implementation of lookupEnvFunc is [os.LookupEnv],
+// but others exist for testing.
+type lookupEnvFunc func(key string) (string, bool)
+
+// get retrieves the environment variable named by the key.
+// It returns the value, which will be empty if the variable is not present.
+func (f lookupEnvFunc) get(key string) string {
+	v, _ := f(key)
+	return v
+}
+
+// A lookPathFunc is a function that searches for the executable named file in the current path.
+// The de facto implementation of lookPathFunc is [exec.LookPath].
+type lookPathFunc func(file string) (string, error)
 
 // ANSI escape codes.
 // Details about hyperlinks at https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda

@@ -53,7 +53,7 @@ type submitCmd struct {
 	Push      bool     `kong:"negatable,help=Push commits to GitHub (on by default),default=true"`
 }
 
-func (c *submitCmd) Run(ctx context.Context, k *kong.Kong) error {
+func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 	const defaultPRNumberWidth = 3
 
 	if c.shouldCreatePushBookmarks() && !c.Push {
@@ -159,7 +159,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong) error {
 		return fmt.Errorf("push remote: %v", err)
 	}
 
-	token, err := gitHubToken(ctx)
+	token, err := gitHubToken(ctx, global.lookupEnv, global.lookPath)
 	if err != nil {
 		if !c.DryRun {
 			return err

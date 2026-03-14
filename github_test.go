@@ -24,32 +24,50 @@ package main
 
 import (
 	"context"
-	"fmt"
-
-	"github.com/alecthomas/kong"
-	"github.com/shurcooL/githubv4"
+	"os/exec"
+	"testing"
 )
 
-type doctorCmd struct{}
-
-func (c *doctorCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
-	token, err := gitHubToken(ctx, global.lookupEnv, global.lookPath)
-	if err != nil {
-		return err
+func TestGitHubToken(t *testing.T) {
+	tests := []struct {
+		name string
+		env  map[string]string
+		want string
+		err  bool
+	}{
+		{
+			name: "EmptyEnviron",
+			env:  map[string]string{},
+			err:  true,
+		},
+		{
+			name: "EnvVar",
+			env: map[string]string{
+				"GITHUB_TOKEN": "foo123456",
+			},
+			want: "foo123456",
+		},
 	}
-	httpClient := newGitHubHTTPClient(token)
-	defer httpClient.CloseIdleConnections()
-	client := githubv4.NewClient(httpClient)
 
-	var query struct {
-		Viewer struct {
-			Login githubv4.String
-		}
-	}
-	if err := client.Query(ctx, &query, nil); err != nil {
-		return err
-	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			lookupEnv := lookupEnvFunc(func(key string) (string, bool) {
+				v, ok := test.env[key]
+				return v, ok
+			})
+			lookPath := lookPathFunc(func(file string) (string, error) {
+				return "", &exec.Error{
+					Name: file,
+					Err:  exec.ErrNotFound,
+				}
+			})
 
-	fmt.Fprintf(k.Stdout, "Authenticated as: %s\n", query.Viewer.Login)
-	return nil
+			got, err := gitHubToken(context.Background(), lookupEnv, lookPath)
+			if test.err && err == nil {
+				t.Errorf("gitHubToken(...) = %q, <nil>; want _, <error>", got)
+			} else if !test.err && (got != test.want || err != nil) {
+				t.Errorf("gitHubToken(...) = %q, %v; want %q, <nil>", got, err, test.want)
+			}
+		})
+	}
 }
