@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -287,6 +288,12 @@ func gitHubToken(ctx context.Context, lookupEnv lookupEnvFunc, lookPath lookPath
 
 	if token := lookupEnv.get(varName); token != "" {
 		return token, nil
+	}
+
+	if tokenData, err := readConfigFile(lookupEnv, "github-token"); err == nil {
+		return string(bytes.TrimSpace(tokenData)), nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
 	}
 
 	ghExe, err := lookPath("gh")

@@ -24,13 +24,19 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
+	"iter"
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 
 	"github.com/alecthomas/kong"
 	"golang.org/x/term"
+	"zombiezen.com/go/xdgdir"
 )
 
 type cli struct {
@@ -68,6 +74,43 @@ func (f lookupEnvFunc) get(key string) string {
 // A lookPathFunc is a function that searches for the executable named file in the current path.
 // The de facto implementation of lookPathFunc is [exec.LookPath].
 type lookPathFunc func(file string) (string, error)
+
+const configSubdirName = "jj-domino"
+
+func readConfigFile(lookupEnv lookupEnvFunc, name string) ([]byte, error) {
+	var configDirs iter.Seq[string]
+	if runtime.GOOS == "windows" {
+		configHome, err := windowsConfigHome(lookupEnv)
+		if err != nil {
+			return nil, fmt.Errorf("read %s config: %v", name, err)
+		}
+		configDirs = func(yield func(string) bool) {
+			yield(configHome)
+		}
+	} else {
+		configDirs = (&xdgdir.Dirs{Getenv: lookupEnv.get}).ConfigDirs()
+	}
+
+	var firstError error
+	for configDir := range configDirs {
+		data, err := os.ReadFile(filepath.Join(configDir, configSubdirName, name))
+		if err == nil {
+			return data, nil
+		}
+		if firstError == nil || !errors.Is(err, os.ErrNotExist) {
+			firstError = err
+		}
+	}
+	return nil, firstError
+}
+
+func windowsConfigHome(lookupEnv lookupEnvFunc) (string, error) {
+	appData := lookupEnv.get("AppData")
+	if appData == "" {
+		return "", errors.New("%AppData% not set")
+	}
+	return appData, nil
+}
 
 // ANSI escape codes.
 // Details about hyperlinks at https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda

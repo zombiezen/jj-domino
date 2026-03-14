@@ -24,11 +24,33 @@ package main
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"testing"
 )
 
 func TestGitHubToken(t *testing.T) {
+	configHome := t.TempDir()
+	appConfigDir := filepath.Join(configHome, configSubdirName)
+	if err := os.Mkdir(appConfigDir, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	const fileToken = "__filetoken__"
+	fileTokenPath := filepath.Join(appConfigDir, "github-token")
+	if err := os.WriteFile(fileTokenPath, []byte(fileToken+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	emptyDir := t.TempDir()
+
+	configHomeEnvVar := "XDG_CONFIG_HOME"
+	configDirsEnvVar := "XDG_CONFIG_DIRS"
+	if runtime.GOOS == "windows" {
+		configHomeEnvVar = "AppData"
+	}
+
 	tests := []struct {
 		name string
 		env  map[string]string
@@ -37,15 +59,51 @@ func TestGitHubToken(t *testing.T) {
 	}{
 		{
 			name: "EmptyEnviron",
-			env:  map[string]string{},
-			err:  true,
+			env: map[string]string{
+				configDirsEnvVar: emptyDir,
+			},
+			err: true,
 		},
 		{
 			name: "EnvVar",
 			env: map[string]string{
-				"GITHUB_TOKEN": "foo123456",
+				"GITHUB_TOKEN":   "foo123456",
+				configDirsEnvVar: emptyDir,
 			},
 			want: "foo123456",
+		},
+		{
+			name: "FileInHome",
+			env: map[string]string{
+				configHomeEnvVar: configHome,
+				configDirsEnvVar: emptyDir,
+			},
+			want: fileToken,
+		},
+		{
+			name: "FileInFallbackDir",
+			env: map[string]string{
+				configHomeEnvVar: emptyDir,
+				configDirsEnvVar: configHome,
+			},
+			want: fileToken,
+		},
+		{
+			name: "EnvVarOverride",
+			env: map[string]string{
+				"GITHUB_TOKEN":   "foo123456",
+				configHomeEnvVar: configHome,
+				configDirsEnvVar: emptyDir,
+			},
+			want: "foo123456",
+		},
+		{
+			name: "FileMissing",
+			env: map[string]string{
+				configHomeEnvVar: emptyDir,
+				configDirsEnvVar: emptyDir,
+			},
+			err: true,
 		},
 	}
 

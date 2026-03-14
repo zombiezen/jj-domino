@@ -9,6 +9,7 @@ require (
 	github.com/google/go-cmp v0.7.0
 	github.com/shurcooL/githubv4 v0.0.0-20260209031235-2402fdf4a9ed
 	golang.org/x/term v0.40.0
+	zombiezen.com/go/xdgdir v1.0.0
 )
 
 require (
