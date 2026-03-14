@@ -36,7 +36,8 @@ Assuming you already have [Jujutsu][] installed:
 3. Authenticate to GitHub using one of two options:
    - If you're already using the [GitHub CLI][], then run `gh auth login`.
    - Otherwise, [create a personal access token with `repo` scope](https://github.com/settings/tokens/new?scopes=repo)
-     and store it in the environment variable `GITHUB_TOKEN`.
+     and store it in the environment variable `GITHUB_TOKEN`
+     or the file `$XDG_CONFIG_DIRS/jj-domino/github-token`.
 
 [GitHub CLI]: https://cli.github.com/
 
