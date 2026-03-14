@@ -40,6 +40,7 @@ import (
 )
 
 type cli struct {
+	stdin     io.Reader     `kong:"-"`
 	lookupEnv lookupEnvFunc `kong:"-"`
 	lookPath  lookPathFunc  `kong:"-"`
 
@@ -49,6 +50,7 @@ type cli struct {
 
 func main() {
 	c := &cli{
+		stdin:     os.Stdin,
 		lookupEnv: os.LookupEnv,
 		lookPath:  exec.LookPath,
 	}

@@ -23,19 +23,27 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
+	"slices"
 
 	"github.com/alecthomas/kong"
 	"github.com/shurcooL/githubv4"
+	"zombiezen.com/go/xdgdir"
 )
 
 type authCmd struct {
-	Status authStatusCmd `kong:"cmd,help=Display the authentication status"`
+	GitHubLogin authGitHubLoginCmd `kong:"cmd,name=github-login,help=Writes GitHub token to configuration file"`
+	Status      authStatusCmd      `kong:"cmd,help=Display the authentication status"`
 }
 
 type authStatusCmd struct{}
@@ -59,6 +67,59 @@ func (c *authStatusCmd) Run(ctx context.Context, k *kong.Kong, global *cli) erro
 	}
 
 	fmt.Fprintf(k.Stdout, "Authenticated as: %s\n", query.Viewer.Login)
+	return nil
+}
+
+type authGitHubLoginCmd struct {
+	Quiet bool `kong:"short=q,help=Don\\'t print out prompt"`
+}
+
+func (c *authGitHubLoginCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
+	var configHome string
+	if runtime.GOOS == "windows" {
+		var err error
+		configHome, err = windowsConfigHome(global.lookupEnv)
+		if err != nil {
+			return err
+		}
+	} else {
+		var err error
+		configHome, err = (&xdgdir.Dirs{Getenv: global.lookupEnv.get}).ConfigHome()
+		if err != nil {
+			return err
+		}
+	}
+
+	if !c.Quiet {
+		const url = "https://github.com/settings/tokens/new?scopes=repo"
+		if isTerminal(k.Stderr) {
+			io.WriteString(k.Stderr, "Visit "+osc+"8;;"+url+st+url+endLink+" to generate a new GitHub token.\n")
+		} else {
+			io.WriteString(k.Stderr, "Visit "+url+" to generate a new GitHub token.\n")
+		}
+		io.WriteString(k.Stderr, "Token: ")
+	}
+
+	s := bufio.NewScanner(global.stdin)
+	if !s.Scan() {
+		err := cmp.Or(s.Err(), io.EOF)
+		return err
+	}
+	token := bytes.TrimSpace(s.Bytes())
+	if len(token) == 0 {
+		return errors.New("no token entered")
+	}
+	path := filepath.Join(configHome, configSubdirName, "github-token")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, append(slices.Clip(token), '\n'), 0o600); err != nil {
+		return err
+	}
+
+	if !c.Quiet {
+		fmt.Fprintf(k.Stderr, "Wrote GitHub token to %s\n", path)
+	}
 	return nil
 }
 
