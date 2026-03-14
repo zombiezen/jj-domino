@@ -24,40 +24,32 @@ package main
 
 import (
 	"context"
-	"io"
-	"log"
-	"os"
+	"fmt"
 
 	"github.com/alecthomas/kong"
-	"golang.org/x/term"
+	"github.com/shurcooL/githubv4"
 )
 
-type cli struct {
-	Submit submitCmd `kong:"cmd,default=withargs,help=Submit a review stack"`
-	Doctor doctorCmd `kong:"cmd,help=Verify auth and config settings"`
-}
+type doctorCmd struct{}
 
-func main() {
-	ctx := kong.Parse(&cli{}, kong.UsageOnError())
-	ctx.BindTo(context.Background(), (*context.Context)(nil))
-	if err := ctx.Run(); err != nil {
-		log.Fatal(err)
+func (c *doctorCmd) Run(ctx context.Context, k *kong.Kong) error {
+	token, err := gitHubToken(ctx)
+	if err != nil {
+		return err
 	}
-}
+	httpClient := newGitHubHTTPClient(token)
+	defer httpClient.CloseIdleConnections()
+	client := githubv4.NewClient(httpClient)
 
-// ANSI escape codes.
-// Details about hyperlinks at https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda
-const (
-	// osc is the escape sequence for an Operating System Command (OSC).
-	osc = "\x1b]"
-	// st is the escape sequence for a String Terminator (ST).
-	st = "\x1b\\"
+	var query struct {
+		Viewer struct {
+			Login githubv4.String
+		}
+	}
+	if err := client.Query(ctx, &query, nil); err != nil {
+		return err
+	}
 
-	// endLink is the escape sequence that ends a hyperlink.
-	endLink = osc + "8;;" + st
-)
-
-func isTerminal(f io.Writer) bool {
-	osFile, ok := f.(*os.File)
-	return ok && term.IsTerminal(int(osFile.Fd()))
+	fmt.Fprintf(k.Stdout, "Authenticated as: %s\n", query.Viewer.Login)
+	return nil
 }
