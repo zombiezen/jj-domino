@@ -23,14 +23,11 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
-	"os/exec"
 	"strings"
 
 	"gg-scm.io/pkg/git"
@@ -280,34 +277,4 @@ func newGitHubHTTPClient(token string) *http.Client {
 			rt:    http.DefaultTransport,
 		},
 	}
-}
-
-// gitHubToken obtains a GitHub personal access token from the environment.
-func gitHubToken(ctx context.Context, lookupEnv lookupEnvFunc, lookPath lookPathFunc) (string, error) {
-	const varName = "GITHUB_TOKEN"
-
-	if token := lookupEnv.get(varName); token != "" {
-		return token, nil
-	}
-
-	if tokenData, err := readConfigFile(lookupEnv, "github-token"); err == nil {
-		return string(bytes.TrimSpace(tokenData)), nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return "", err
-	}
-
-	ghExe, err := lookPath("gh")
-	if err != nil {
-		// If the gh CLI is not installed, prompt the user to set the environment variable.
-		if errors.Is(err, exec.ErrNotFound) {
-			return "", fmt.Errorf("%s not set", varName)
-		}
-		return "", fmt.Errorf("gh auth token: %v", err)
-	}
-	cmd := exec.CommandContext(ctx, ghExe, "auth", "token", "--hostname=github.com")
-	raw, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("gh auth token: %v", err)
-	}
-	return string(bytes.TrimSpace(raw)), nil
 }

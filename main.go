@@ -44,7 +44,7 @@ type cli struct {
 	lookPath  lookPathFunc
 
 	Submit submitCmd `kong:"cmd,default=withargs,help=Submit a review stack"`
-	Doctor doctorCmd `kong:"cmd,help=Verify auth and config settings"`
+	Auth   authCmd   `kong:"cmd,help=Manage credentials"`
 }
 
 func main() {

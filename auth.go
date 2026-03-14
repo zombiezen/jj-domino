@@ -23,16 +23,24 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"os"
+	"os/exec"
 
 	"github.com/alecthomas/kong"
 	"github.com/shurcooL/githubv4"
 )
 
-type doctorCmd struct{}
+type authCmd struct {
+	Status authStatusCmd `kong:"cmd,help=Display the authentication status"`
+}
 
-func (c *doctorCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
+type authStatusCmd struct{}
+
+func (c *authStatusCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 	token, err := gitHubToken(ctx, global.lookupEnv, global.lookPath)
 	if err != nil {
 		return err
@@ -52,4 +60,34 @@ func (c *doctorCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 
 	fmt.Fprintf(k.Stdout, "Authenticated as: %s\n", query.Viewer.Login)
 	return nil
+}
+
+// gitHubToken obtains a GitHub personal access token from the environment.
+func gitHubToken(ctx context.Context, lookupEnv lookupEnvFunc, lookPath lookPathFunc) (string, error) {
+	const varName = "GITHUB_TOKEN"
+
+	if token := lookupEnv.get(varName); token != "" {
+		return token, nil
+	}
+
+	if tokenData, err := readConfigFile(lookupEnv, "github-token"); err == nil {
+		return string(bytes.TrimSpace(tokenData)), nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+
+	ghExe, err := lookPath("gh")
+	if err != nil {
+		// If the gh CLI is not installed, prompt the user to set the environment variable.
+		if errors.Is(err, exec.ErrNotFound) {
+			return "", fmt.Errorf("%s not set", varName)
+		}
+		return "", fmt.Errorf("gh auth token: %v", err)
+	}
+	cmd := exec.CommandContext(ctx, ghExe, "auth", "token", "--hostname=github.com")
+	raw, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("gh auth token: %v", err)
+	}
+	return string(bytes.TrimSpace(raw)), nil
 }
