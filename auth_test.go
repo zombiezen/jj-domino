@@ -28,8 +28,44 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+
+	"github.com/alecthomas/kong"
 )
+
+func TestAuthGitHubLoginCmd(t *testing.T) {
+	const fakeToken = "foo123456"
+	configHome := t.TempDir()
+	c := &cli{
+		stdin: strings.NewReader(fakeToken + "\n"),
+		lookupEnv: func(key string) (string, bool) {
+			switch key {
+			case "XDG_CONFIG_HOME", "AppData":
+				return configHome, true
+			default:
+				return "", false
+			}
+		},
+		lookPath: stubLookPath,
+	}
+
+	stdout := new(strings.Builder)
+	stderr := new(strings.Builder)
+	k := &kong.Kong{
+		Stdout: stdout,
+		Stderr: stderr,
+	}
+	if err := c.Auth.GitHubLogin.Run(context.Background(), k, c); err != nil {
+		t.Error("Run:", err)
+	}
+
+	path := filepath.Join(configHome, configSubdirName, "github-token")
+	got, err := os.ReadFile(path)
+	if want := fakeToken + "\n"; string(got) != want || err != nil {
+		t.Errorf("os.ReadFile(%q) = %q, %v; want %q, <nil>", path, got, err, want)
+	}
+}
 
 func TestGitHubToken(t *testing.T) {
 	configHome := t.TempDir()
@@ -120,12 +156,7 @@ func TestGitHubToken(t *testing.T) {
 				v, ok := test.env[key]
 				return v, ok
 			})
-			lookPath := lookPathFunc(func(file string) (string, error) {
-				return "", &exec.Error{
-					Name: file,
-					Err:  exec.ErrNotFound,
-				}
-			})
+			lookPath := lookPathFunc(stubLookPath)
 
 			got, err := gitHubToken(context.Background(), lookupEnv, lookPath)
 			if test.err && err == nil {
@@ -134,5 +165,12 @@ func TestGitHubToken(t *testing.T) {
 				t.Errorf("gitHubToken(...) = %q, %v; want %q, <nil>", got, err, test.want)
 			}
 		})
+	}
+}
+
+func stubLookPath(file string) (string, error) {
+	return "", &exec.Error{
+		Name: file,
+		Err:  exec.ErrNotFound,
 	}
 }
