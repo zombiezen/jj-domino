@@ -285,6 +285,86 @@ func (jj *Jujutsu) Log(ctx context.Context, revset string, yield func(*Commit) b
 	return nil
 }
 
+func (jj *Jujutsu) ShowFile(ctx context.Context, revset string, path string) (io.ReadCloser, error) {
+	errPrefix := fmt.Sprintf("jj file show -r %s %s", revset, path)
+	cmd := jj.command(ctx, "file", "show", "--revision="+revset, "--", path)
+	stderr := new(bytes.Buffer)
+	cmd.Stderr = stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("%s: %v", errPrefix, err)
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("%s: %v", errPrefix, err)
+	}
+
+	// If jj reports an error, stdout will be empty and stderr will contain the error message.
+	first := make([]byte, 2048)
+	readLen, readErr := io.ReadAtLeast(stdout, first, 1)
+	if readErr != nil {
+		// Empty stdout, check for error.
+		var err error
+		err = errors.Join(err, stdout.Close())
+		err = errors.Join(err, cmd.Wait())
+		if err != nil {
+			return nil, cmderror.New(errPrefix, err, stderr.Bytes())
+		}
+		if !errors.Is(readErr, io.EOF) {
+			return nil, cmderror.New(errPrefix, readErr, stderr.Bytes())
+		}
+		return io.NopCloser(bytes.NewReader(nil)), nil
+	}
+	return &fileReader{
+		errPrefix: errPrefix,
+		first:     first[:readLen],
+		pipe:      stdout,
+		wait:      cmd.Wait,
+		stderr:    stderr,
+	}, nil
+}
+
+type fileReader struct {
+	errPrefix string
+	first     []byte
+	pipe      io.ReadCloser
+	wait      func() error
+	stderr    *bytes.Buffer // can't be read until wait returns
+}
+
+func (fr *fileReader) Read(p []byte) (int, error) {
+	if len(fr.first) > 0 {
+		n := copy(p, fr.first)
+		fr.first = fr.first[n:]
+		return n, nil
+	}
+	return fr.pipe.Read(p)
+}
+
+func (fr *fileReader) WriteTo(w io.Writer) (int64, error) {
+	var n int64
+	if len(fr.first) > 0 {
+		nn, err := w.Write(fr.first)
+		fr.first = fr.first[nn:]
+		n += int64(nn)
+		if err != nil {
+			return n, err
+		}
+	}
+	nn, err := io.Copy(w, fr.pipe)
+	n += nn
+	return n, err
+}
+
+func (fr *fileReader) Close() error {
+	closeErr := fr.pipe.Close()
+	waitErr := fr.wait()
+	// Wait errors are usually more interesting than close errors.
+	if err := cmp.Or(waitErr, closeErr); err != nil {
+		return cmderror.New("close "+fr.errPrefix, waitErr, fr.stderr.Bytes())
+	}
+	return nil
+}
+
 func (jj *Jujutsu) WorkspaceRoot(ctx context.Context) (string, error) {
 	out, err := jj.command(ctx, "workspace", "root", "--ignore-working-copy").Output()
 	if err != nil {
