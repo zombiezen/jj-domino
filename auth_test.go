@@ -56,6 +56,8 @@ func TestGitHubToken(t *testing.T) {
 		env  map[string]string
 		want string
 		err  bool
+
+		skipOnWindows bool
 	}{
 		{
 			name: "EmptyEnviron",
@@ -86,7 +88,8 @@ func TestGitHubToken(t *testing.T) {
 				configHomeEnvVar: emptyDir,
 				configDirsEnvVar: configHome,
 			},
-			want: fileToken,
+			want:          fileToken,
+			skipOnWindows: true,
 		},
 		{
 			name: "EnvVarOverride",
@@ -109,6 +112,10 @@ func TestGitHubToken(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			if test.skipOnWindows && runtime.GOOS == "windows" {
+				t.Skip("Skip on Windows")
+			}
+
 			lookupEnv := lookupEnvFunc(func(key string) (string, bool) {
 				v, ok := test.env[key]
 				return v, ok
