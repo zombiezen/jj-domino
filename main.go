@@ -41,7 +41,7 @@ import (
 
 type cli struct {
 	lookupEnv lookupEnvFunc `kong:"-"`
-	lookPath  lookPathFunc
+	lookPath  lookPathFunc  `kong:"-"`
 
 	Submit submitCmd `kong:"cmd,default=withargs,help=Submit a review stack"`
 	Auth   authCmd   `kong:"cmd,help=Manage credentials"`
