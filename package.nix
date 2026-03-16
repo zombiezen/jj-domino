@@ -51,7 +51,7 @@ in
 
     inherit src;
 
-    vendorHash = "sha256-stteyQxX93zYVX0qxXJe3piZ7CNskLFuuYD+AWnlfcs=";
+    vendorHash = "sha256-E+UXKFG8Bzf9ChY0GGcMW7BaOT4bj7tsw+O3KiykCBk=";
 
     subPackages = ["."];
     goSum = builtins.readFile ./go.sum;
