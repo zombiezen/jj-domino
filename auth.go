@@ -39,6 +39,7 @@ import (
 	"github.com/alecthomas/kong"
 	"github.com/shurcooL/githubv4"
 	"zombiezen.com/go/jj-domino/internal/cmderror"
+	"zombiezen.com/go/jj-domino/internal/sigterm"
 	"zombiezen.com/go/xdgdir"
 )
 
@@ -147,6 +148,7 @@ func gitHubToken(ctx context.Context, lookupEnv lookupEnvFunc, lookPath lookPath
 		return "", fmt.Errorf("gh auth token: %v", err)
 	}
 	cmd := exec.CommandContext(ctx, ghExe, "auth", "token", "--hostname=github.com")
+	cmd.Cancel = func() error { return sigterm.CancelProcess(cmd.Process) }
 	stderr := new(bytes.Buffer)
 	cmd.Stderr = stderr
 	raw, err := cmd.Output()

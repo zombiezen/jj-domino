@@ -38,6 +38,7 @@ import (
 	jsonv2 "github.com/go-json-experiment/json"
 	"github.com/go-json-experiment/json/jsontext"
 	"zombiezen.com/go/jj-domino/internal/cmderror"
+	"zombiezen.com/go/jj-domino/internal/sigterm"
 )
 
 // Jujutsu is a context for performing Jujutsu version control operations.
@@ -93,6 +94,7 @@ func (jj *Jujutsu) command(ctx context.Context, args ...string) *exec.Cmd {
 	cmd.Dir = jj.dir
 	cmd.Env = jj.env
 	cmd.Stderr = os.Stderr
+	cmd.Cancel = func() error { return sigterm.CancelProcess(cmd.Process) }
 	return cmd
 }
 

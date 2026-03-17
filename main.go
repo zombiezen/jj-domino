@@ -36,6 +36,7 @@ import (
 
 	"github.com/alecthomas/kong"
 	"golang.org/x/term"
+	"zombiezen.com/go/jj-domino/internal/sigterm"
 	"zombiezen.com/go/xdgdir"
 )
 
@@ -55,8 +56,11 @@ func main() {
 		lookPath:  exec.LookPath,
 	}
 	k := kong.Parse(c, kong.UsageOnError())
-	k.BindTo(context.Background(), (*context.Context)(nil))
-	if err := k.Run(); err != nil {
+	ctx, cancel := sigterm.NotifyContext(context.Background())
+	k.BindTo(ctx, (*context.Context)(nil))
+	err := k.Run()
+	cancel()
+	if err != nil {
 		log.Fatal(err)
 	}
 }
