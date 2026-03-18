@@ -220,6 +220,11 @@ type Bookmark struct {
 	TargetMerge Merge[CommitID] `json:"target"`
 }
 
+// RefSymbol returns the ref symbol that represents the bookmark.
+func (b *Bookmark) RefSymbol() RefSymbol {
+	return RefSymbol{Name: b.Name, Remote: b.Remote}
+}
+
 func (jj *Jujutsu) ListBookmarks(ctx context.Context) ([]*Bookmark, error) {
 	out, err := jj.command(ctx, "bookmark", "list", "--all", "--ignore-working-copy", "--template", "json(self)").Output()
 	if err != nil {

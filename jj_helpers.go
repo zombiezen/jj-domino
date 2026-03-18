@@ -31,6 +31,8 @@ import (
 	"slices"
 	"strings"
 
+	jsonv2 "github.com/go-json-experiment/json"
+	"github.com/go-json-experiment/json/jsontext"
 	"zombiezen.com/go/jj-domino/internal/jujutsu"
 )
 
@@ -99,6 +101,57 @@ func jjGitPush(ctx context.Context, jj *jujutsu.Jujutsu, w io.Writer, dryRun boo
 		return fmt.Errorf("jj git push --remote=%s: %v", pushRemoteName, err)
 	}
 	return nil
+}
+
+// resolveTrunk attempts to determine the [jujutsu.RefSymbol] that the trunk() revset uses.
+// This isn't a well-defined operation in Jujutsu because trunk() is a revset,
+// so resolveTrunk makes a best effort to resolve most common scenarios.
+func resolveTrunk(settings map[string]jsontext.Value, bookmarks []*jujutsu.Bookmark) (jujutsu.RefSymbol, error) {
+	const key = `revset-aliases."trunk()"`
+	if definition := settings[key]; len(definition) > 0 {
+		var revset string
+		if err := jsonv2.Unmarshal(definition, &revset); err != nil {
+			return jujutsu.RefSymbol{}, fmt.Errorf("parse jj config get %s: %v", key, err)
+		}
+		refSymbol, err := jujutsu.ParseRefSymbol(revset)
+		if err != nil {
+			return jujutsu.RefSymbol{}, fmt.Errorf("parse jj config get %s: %s: %v", key, revset, err)
+		}
+		return refSymbol, nil
+	}
+
+	// Built-in trunk() is defined here:
+	// https://github.com/jj-vcs/jj/blob/v0.39.0/cli/src/config/revsets.toml#L21-L31
+	possible := make([]*jujutsu.Bookmark, 0, 6)
+	for _, b := range bookmarks {
+		if _, ok := b.TargetMerge.Resolved(); !ok {
+			continue
+		}
+		if (b.Name == "main" || b.Name == "master" || b.Name == "trunk") &&
+			(b.Remote == "origin" || b.Remote == "upstream") {
+			possible = append(possible, b)
+		}
+	}
+	switch {
+	case len(possible) == 0:
+		return jujutsu.RefSymbol{}, fmt.Errorf("resolve trunk(): no suitable bookmarks found")
+	case len(possible) > 1:
+		// TODO(maybe): Jujutsu uses the latest(...) revset function
+		// to disambiguate.
+		// This requires a `jj log` for us, and it's unclear whether this is desirable.
+		// For now, just return an error, and make the user set a trunk().
+		sb := new(strings.Builder)
+		sb.WriteString("resolve trunk(): multiple found (")
+		for i, b := range bookmarks {
+			if i > 0 {
+				sb.WriteString("|")
+			}
+			sb.WriteString(b.RefSymbol().String())
+		}
+		sb.WriteString(")")
+		return jujutsu.RefSymbol{}, errors.New(sb.String())
+	}
+	return possible[0].RefSymbol(), nil
 }
 
 // nameForCommit finds a single local bookmark name for the given commit ID
