@@ -491,10 +491,10 @@ type plannedPullRequest struct {
 	baseRepositoryPath gitHubRepositoryPath
 }
 
-func planPullRequests(baseRepoPath gitHubRepositoryPath, baseRefName string, headRepo *gitHubRepository, stack []localCommitRef) []*plannedPullRequest {
+func planPullRequests(baseRepoPath gitHubRepositoryPath, baseRefName string, headRepo *gitHubRepository, stack []stackedDiff) []*plannedPullRequest {
 	plan := make([]*plannedPullRequest, 0, len(stack))
 	isFork := headRepo.path() != baseRepoPath
-	for i, bookmark := range stack {
+	for i, diff := range stack {
 		var prBase string
 		if i == 0 || isFork {
 			// A pull request's base ref must be in the pull request's repository.
@@ -503,13 +503,19 @@ func planPullRequests(baseRepoPath gitHubRepositoryPath, baseRefName string, hea
 		} else {
 			prBase = stack[i-1].name
 		}
-		title, body := cutCommitDescription(bookmark.commit.Description)
+		title, body := inferPullRequestMessage(func(yield func(string) bool) {
+			for c := range diff.commitsBackward() {
+				if !yield(c.Description) {
+					return
+				}
+			}
+		})
 		plan = append(plan, &plannedPullRequest{
 			baseRepositoryPath: baseRepoPath,
 			pullRequest: pullRequest{
 				BaseRefName:    githubv4.String(prBase),
 				HeadRepository: headRepo,
-				HeadRefName:    githubv4.String(bookmark.name),
+				HeadRefName:    githubv4.String(diff.name),
 
 				Title:   githubv4.String(title),
 				Body:    githubv4.String(body),
@@ -612,12 +618,24 @@ func trimStackFooter(s string) string {
 	return s
 }
 
+// localCommitRef represents a local bookmark.
 type localCommitRef struct {
 	name   string
 	commit *jujutsu.Commit
 }
 
-func stackForBookmark(ctx context.Context, jj *jujutsu.Jujutsu, bookmarks []*jujutsu.Bookmark, baseRef jujutsu.RefSymbol, bookmark string) ([]localCommitRef, error) {
+// stackedDiff represents a single local bookmark to be pushed
+// as part of a pull request stack.
+type stackedDiff struct {
+	localCommitRef
+
+	// uniqueAncestors is the set of commits beyond that referenced by the bookmark
+	// that would be merged by the pull request.
+	// Parents appear before children.
+	uniqueAncestors []*jujutsu.Commit
+}
+
+func stackForBookmark(ctx context.Context, jj *jujutsu.Jujutsu, bookmarks []*jujutsu.Bookmark, baseRef jujutsu.RefSymbol, bookmark string) ([]stackedDiff, error) {
 	type stackFrame struct {
 		curr  *jujutsu.Commit
 		trail []localCommitRef
@@ -649,9 +667,11 @@ func stackForBookmark(ctx context.Context, jj *jujutsu.Jujutsu, bookmarks []*juj
 		return nil, fmt.Errorf("compute stack for %q: commit %v is ancestor of %v", bookmark, headCommitID, baseRef)
 	}
 
-	stack := []localCommitRef{{
-		name:   bookmark,
-		commit: headCommit,
+	stack := []stackedDiff{{
+		localCommitRef: localCommitRef{
+			name:   bookmark,
+			commit: headCommit,
+		},
 	}}
 	visited := make(map[string]struct{})
 	var resultError error
@@ -668,12 +688,17 @@ func stackForBookmark(ctx context.Context, jj *jujutsu.Jujutsu, bookmarks []*juj
 				// Base ref or base ref ancestor.
 				continue
 			}
-			if name, err := nameForCommit(bookmarks, id); err != nil && !isNoBookmarksError(err) {
+			if name, err := nameForCommit(bookmarks, id); isNoBookmarksError(err) {
+				top := &stack[len(stack)-1]
+				top.uniqueAncestors = append(top.uniqueAncestors, c)
+			} else if err != nil {
 				resultError = errors.Join(resultError, err)
-			} else if err == nil {
-				stack = append(stack, localCommitRef{
-					name:   name,
-					commit: c,
+			} else {
+				stack = append(stack, stackedDiff{
+					localCommitRef: localCommitRef{
+						name:   name,
+						commit: c,
+					},
 				})
 			}
 			next = append(next, c.Parents...)
@@ -682,10 +707,28 @@ func stackForBookmark(ctx context.Context, jj *jujutsu.Jujutsu, bookmarks []*juj
 	}
 
 	slices.Reverse(stack)
+	for i := range stack {
+		slices.Reverse(stack[i].uniqueAncestors)
+	}
 	if resultError != nil {
 		resultError = fmt.Errorf("compute stack for %q: %w", bookmark, resultError)
 	}
 	return stack, resultError
+}
+
+// commitsBackward returns an iterator over all the commits in the diff.
+// The iterator will yield child commits before their parents.
+func (diff *stackedDiff) commitsBackward() iter.Seq[*jujutsu.Commit] {
+	return func(yield func(*jujutsu.Commit) bool) {
+		if !yield(diff.commit) {
+			return
+		}
+		for _, c := range slices.Backward(diff.uniqueAncestors) {
+			if !yield(c) {
+				return
+			}
+		}
+	}
 }
 
 // nameForCommit finds a single local bookmark name for the given commit ID
@@ -723,10 +766,28 @@ func (err noBookmarksError) Error() string {
 	return fmt.Sprintf("commit %v has no bookmarks", err.id)
 }
 
-func cutCommitDescription(s string) (title, body string) {
-	title, body, _ = strings.Cut(s, "\n")
-	body = strings.TrimSpace(body)
-	return
+func inferPullRequestMessage(descriptions iter.Seq[string]) (title, body string) {
+	bodyBuilder := new(strings.Builder)
+	i := 0
+	for msg := range descriptions {
+		if i == 0 {
+			// First line of first commit message is the title.
+			if j := strings.IndexByte(msg, '\n'); j != -1 {
+				title = strings.TrimSpace(msg[:j])
+				bodyBuilder.WriteString(strings.TrimSpace(msg[j+1:]))
+			} else {
+				title = strings.TrimSpace(msg)
+			}
+			i++
+			continue
+		}
+		// Join rest of messages by bullets into body.
+		bodyBuilder.WriteString("\n\n* ")
+		bodyBuilder.WriteString(strings.TrimSpace(msg))
+		i++
+	}
+	body = strings.TrimSpace(bodyBuilder.String())
+	return title, body
 }
 
 func formatPRNumber(n githubv4.Int, width int) string {
