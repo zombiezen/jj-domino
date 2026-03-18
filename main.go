@@ -37,6 +37,7 @@ import (
 
 	"github.com/alecthomas/kong"
 	"golang.org/x/term"
+	"zombiezen.com/go/jj-domino/internal/jujutsu"
 	"zombiezen.com/go/jj-domino/internal/sigterm"
 	"zombiezen.com/go/xdgdir"
 )
@@ -48,6 +49,17 @@ type cli struct {
 
 	Submit submitCmd `kong:"cmd,default=withargs,help=Submit a review stack"`
 	Auth   authCmd   `kong:"cmd,help=Manage credentials"`
+}
+
+func (c *cli) newJujutsu() (*jujutsu.Jujutsu, error) {
+	jjExe, err := c.lookPath("jj")
+	if err != nil {
+		return nil, err
+	}
+	return jujutsu.New(jujutsu.Options{
+		JJExe: jjExe,
+		Env:   environMapToSlice(c.environ),
+	})
 }
 
 func main() {
