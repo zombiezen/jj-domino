@@ -51,7 +51,7 @@ type authCmd struct {
 type authStatusCmd struct{}
 
 func (c *authStatusCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
-	token, err := gitHubToken(ctx, global.lookupEnv, global.lookPath)
+	token, err := gitHubToken(ctx, global.environ, global.lookPath)
 	if err != nil {
 		return err
 	}
@@ -80,13 +80,13 @@ func (c *authGitHubLoginCmd) Run(ctx context.Context, k *kong.Kong, global *cli)
 	var configHome string
 	if runtime.GOOS == "windows" {
 		var err error
-		configHome, err = windowsConfigHome(global.lookupEnv)
+		configHome, err = windowsConfigHome(lookupEnvMapFunc(global.environ))
 		if err != nil {
 			return err
 		}
 	} else {
 		var err error
-		configHome, err = (&xdgdir.Dirs{Getenv: global.lookupEnv.get}).ConfigHome()
+		configHome, err = (&xdgdir.Dirs{Getenv: lookupEnvMapFunc(global.environ).get}).ConfigHome()
 		if err != nil {
 			return err
 		}
@@ -126,14 +126,14 @@ func (c *authGitHubLoginCmd) Run(ctx context.Context, k *kong.Kong, global *cli)
 }
 
 // gitHubToken obtains a GitHub personal access token from the environment.
-func gitHubToken(ctx context.Context, lookupEnv lookupEnvFunc, lookPath lookPathFunc) (string, error) {
+func gitHubToken(ctx context.Context, environ map[string]string, lookPath lookPathFunc) (string, error) {
 	const varName = "GITHUB_TOKEN"
 
-	if token := lookupEnv.get(varName); token != "" {
+	if token := environ[varName]; token != "" {
 		return token, nil
 	}
 
-	if tokenData, err := readConfigFile(lookupEnv, "github-token"); err == nil {
+	if tokenData, err := readConfigFile(lookupEnvMapFunc(environ), "github-token"); err == nil {
 		return string(bytes.TrimSpace(tokenData)), nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", err
@@ -148,6 +148,7 @@ func gitHubToken(ctx context.Context, lookupEnv lookupEnvFunc, lookPath lookPath
 		return "", fmt.Errorf("gh auth token: %v", err)
 	}
 	cmd := exec.CommandContext(ctx, ghExe, "auth", "token", "--hostname=github.com")
+	cmd.Env = environMapToSlice(environ)
 	cmd.Cancel = func() error { return sigterm.CancelProcess(cmd.Process) }
 	stderr := new(bytes.Buffer)
 	cmd.Stderr = stderr

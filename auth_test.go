@@ -39,13 +39,9 @@ func TestAuthGitHubLoginCmd(t *testing.T) {
 	configHome := t.TempDir()
 	c := &cli{
 		stdin: strings.NewReader(fakeToken + "\n"),
-		lookupEnv: func(key string) (string, bool) {
-			switch key {
-			case "XDG_CONFIG_HOME", "AppData":
-				return configHome, true
-			default:
-				return "", false
-			}
+		environ: map[string]string{
+			"XDG_CONFIG_HOME": configHome,
+			"AppData":         configHome,
 		},
 		lookPath: stubLookPath,
 	}
@@ -152,13 +148,8 @@ func TestGitHubToken(t *testing.T) {
 				t.Skip("Skip on Windows")
 			}
 
-			lookupEnv := lookupEnvFunc(func(key string) (string, bool) {
-				v, ok := test.env[key]
-				return v, ok
-			})
 			lookPath := lookPathFunc(stubLookPath)
-
-			got, err := gitHubToken(context.Background(), lookupEnv, lookPath)
+			got, err := gitHubToken(context.Background(), test.env, lookPath)
 			if test.err && err == nil {
 				t.Errorf("gitHubToken(...) = %q, <nil>; want _, <error>", got)
 			} else if !test.err && (got != test.want || err != nil) {

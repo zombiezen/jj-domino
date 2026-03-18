@@ -60,7 +60,9 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 		return fmt.Errorf("cannot combine --no-push with --change")
 	}
 
-	jj, err := jujutsu.New(jujutsu.Options{})
+	jj, err := jujutsu.New(jujutsu.Options{
+		Env: environMapToSlice(global.environ),
+	})
 	if err != nil {
 		return err
 	}
@@ -159,7 +161,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 		return fmt.Errorf("push remote: %v", err)
 	}
 
-	token, err := gitHubToken(ctx, global.lookupEnv, global.lookPath)
+	token, err := gitHubToken(ctx, global.environ, global.lookPath)
 	if err != nil {
 		if !c.DryRun {
 			return err
