@@ -33,6 +33,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/alecthomas/kong"
 	"golang.org/x/term"
@@ -41,9 +42,9 @@ import (
 )
 
 type cli struct {
-	stdin     io.Reader     `kong:"-"`
-	lookupEnv lookupEnvFunc `kong:"-"`
-	lookPath  lookPathFunc  `kong:"-"`
+	stdin    io.Reader         `kong:"-"`
+	environ  map[string]string `kong:"-"`
+	lookPath lookPathFunc      `kong:"-"`
 
 	Submit submitCmd `kong:"cmd,default=withargs,help=Submit a review stack"`
 	Auth   authCmd   `kong:"cmd,help=Manage credentials"`
@@ -51,9 +52,9 @@ type cli struct {
 
 func main() {
 	c := &cli{
-		stdin:     os.Stdin,
-		lookupEnv: os.LookupEnv,
-		lookPath:  exec.LookPath,
+		stdin:    os.Stdin,
+		environ:  environMap(),
+		lookPath: exec.LookPath,
 	}
 	k := kong.Parse(c, kong.UsageOnError())
 	ctx, cancel := sigterm.NotifyContext(context.Background())
@@ -69,6 +70,16 @@ func main() {
 // The de facto implementation of lookupEnvFunc is [os.LookupEnv],
 // but others exist for testing.
 type lookupEnvFunc func(key string) (string, bool)
+
+// lookupEnvMapFunc returns a [lookupEnvFunc]
+// that looks up environment variables
+// from the given map.
+func lookupEnvMapFunc(m map[string]string) lookupEnvFunc {
+	return func(key string) (string, bool) {
+		v, ok := m[key]
+		return v, ok
+	}
+}
 
 // get retrieves the environment variable named by the key.
 // It returns the value, which will be empty if the variable is not present.
@@ -133,4 +144,25 @@ const (
 func isTerminal(f io.Writer) bool {
 	osFile, ok := f.(*os.File)
 	return ok && term.IsTerminal(int(osFile.Fd()))
+}
+
+// environMap returns the environment variables as a map.
+func environMap() map[string]string {
+	environ := os.Environ()
+	m := make(map[string]string, len(environ))
+	for _, kv := range environ {
+		k, v, _ := strings.Cut(kv, "=")
+		m[k] = v
+	}
+	return m
+}
+
+// environMapToSlice returns a slice of strings for each entry in m in the format "key=value".
+// The order is undefined.
+func environMapToSlice(m map[string]string) []string {
+	slice := make([]string, 0, len(m))
+	for k, v := range m {
+		slice = append(slice, k+"="+v)
+	}
+	return slice
 }

@@ -123,16 +123,6 @@ func editorCommand(tb testing.TB, content []byte) (*jujutsu.CommandNameAndArgs, 
 	return jujutsu.CommandArgv(cpPath, []string{fname}, environMap()), nil
 }
 
-func environMap() map[string]string {
-	environ := os.Environ()
-	m := make(map[string]string, len(environ))
-	for _, kv := range environ {
-		k, v, _ := strings.Cut(kv, "=")
-		m[k] = v
-	}
-	return m
-}
-
 var findCopyProgram = sync.OnceValues(func() (string, error) {
 	if runtime.GOOS == "windows" {
 		return "cp", nil
