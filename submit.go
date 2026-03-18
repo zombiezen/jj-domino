@@ -160,6 +160,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 	if err != nil {
 		return fmt.Errorf("push remote: %v", err)
 	}
+	pullRequestTemplate := readGitHubPullRequestTemplate(ctx, jj, stack[len(stack)-1].commit.ID.String())
 
 	token, err := gitHubToken(ctx, global.environ, global.lookPath)
 	if err != nil {
@@ -170,7 +171,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 		// We can still display the proposed PRs.
 		log.Printf("Unable to authenticate to GitHub: %v", err)
 
-		plan := planPullRequests(baseRepoPath, baseRef.Name, placeholderGitHubRepository(headRepoPath), stack)
+		plan := planPullRequests(baseRepoPath, baseRef.Name, pullRequestTemplate, placeholderGitHubRepository(headRepoPath), stack)
 		plan[0].IsDraft = githubv4.Boolean(c.Draft)
 		sb := new(strings.Builder)
 		for _, pr := range plan {
@@ -199,7 +200,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 		}
 	}
 
-	plan := planPullRequests(baseRepoPath, baseRef.Name, headRepo, stack)
+	plan := planPullRequests(baseRepoPath, baseRef.Name, pullRequestTemplate, headRepo, stack)
 	plan[0].IsDraft = githubv4.Boolean(c.Draft)
 
 	var baseRepo *gitHubRepository
@@ -491,7 +492,7 @@ type plannedPullRequest struct {
 	baseRepositoryPath gitHubRepositoryPath
 }
 
-func planPullRequests(baseRepoPath gitHubRepositoryPath, baseRefName string, headRepo *gitHubRepository, stack []stackedDiff) []*plannedPullRequest {
+func planPullRequests(baseRepoPath gitHubRepositoryPath, baseRefName string, template string, headRepo *gitHubRepository, stack []stackedDiff) []*plannedPullRequest {
 	plan := make([]*plannedPullRequest, 0, len(stack))
 	isFork := headRepo.path() != baseRepoPath
 	for i, diff := range stack {
@@ -510,6 +511,9 @@ func planPullRequests(baseRepoPath gitHubRepositoryPath, baseRefName string, hea
 				}
 			}
 		})
+		if template != "" {
+			body += "\n\n" + template
+		}
 		plan = append(plan, &plannedPullRequest{
 			baseRepositoryPath: baseRepoPath,
 			pullRequest: pullRequest{
