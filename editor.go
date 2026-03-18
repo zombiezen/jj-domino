@@ -35,6 +35,8 @@ import (
 	"slices"
 	"strings"
 
+	jsonv2 "github.com/go-json-experiment/json"
+	"github.com/go-json-experiment/json/jsontext"
 	"github.com/shurcooL/githubv4"
 	"zombiezen.com/go/jj-domino/internal/jujutsu"
 	"zombiezen.com/go/jj-domino/internal/sigterm"
@@ -215,6 +217,18 @@ type editor struct {
 	stderr   io.Writer
 
 	logError func(context.Context, error)
+}
+
+func jujutsuEditor(settings map[string]jsontext.Value) (*jujutsu.CommandNameAndArgs, error) {
+	v := settings["ui.editor"]
+	if len(v) == 0 || v.Kind() == jsontext.KindNull {
+		return nil, fmt.Errorf("jj config get ui.editor: not set")
+	}
+	c := new(jujutsu.CommandNameAndArgs)
+	if err := jsonv2.Unmarshal(v, c); err != nil {
+		return nil, fmt.Errorf("jj config get ui.editor: %v", err)
+	}
+	return c, nil
 }
 
 // open opens the editor on a temporary file with the given initial content,
