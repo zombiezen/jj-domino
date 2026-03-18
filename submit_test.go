@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/shurcooL/githubv4"
 	"zombiezen.com/go/jj-domino/internal/jujutsu"
 )
@@ -44,10 +46,10 @@ func TestStackForBookmark(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := []localCommitRef{
-			{name: "foo", commit: commits["foo"]},
+		want := []stackedDiff{
+			{localCommitRef: localCommitRef{name: "foo", commit: commits["foo"]}},
 		}
-		if diff := cmp.Diff(want, got, cmp.AllowUnexported(localCommitRef{})); diff != "" {
+		if diff := cmp.Diff(want, got, stackedDiffOption()); diff != "" {
 			t.Errorf("stack (-want +got):\n%s", diff)
 		}
 	})
@@ -80,11 +82,73 @@ func TestStackForBookmark(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := []localCommitRef{
-			{name: "foo", commit: commits["foo"]},
-			{name: "bar", commit: commits["bar"]},
+		want := []stackedDiff{
+			{localCommitRef: localCommitRef{name: "foo", commit: commits["foo"]}},
+			{localCommitRef: localCommitRef{name: "bar", commit: commits["bar"]}},
 		}
-		if diff := cmp.Diff(want, got, cmp.AllowUnexported(localCommitRef{})); diff != "" {
+		if diff := cmp.Diff(want, got, stackedDiffOption()); diff != "" {
+			t.Errorf("stack (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("LinearChainWithExtraCommits", func(t *testing.T) {
+		repoDir := t.TempDir()
+		jj, err := jujutsu.New(jujutsu.Options{
+			Dir:   repoDir,
+			JJExe: jjExe,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := createRepository(ctx, jj); err != nil {
+			t.Fatal(err)
+		}
+		commits, err := newChanges(ctx, jj, []changeDescription{
+			{bookmark: "f"},
+			{bookmark: "e"},
+			{bookmark: "d"},
+			{bookmark: "c"},
+			{bookmark: "b"},
+			{bookmark: "a"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := jj.DeleteBookmarks(ctx, []string{"b", "c", "e", "f"}); err != nil {
+			t.Fatal(err)
+		}
+		bookmarks, err := jj.ListBookmarks(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		got, err := stackForBookmark(ctx, jj, bookmarks, jujutsu.RefSymbol{Name: "main"}, "a")
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []stackedDiff{
+			{
+				localCommitRef: localCommitRef{
+					name:   "d",
+					commit: commits["d"],
+				},
+				uniqueAncestors: []*jujutsu.Commit{
+					commits["f"],
+					commits["e"],
+				},
+			},
+			{
+				localCommitRef: localCommitRef{
+					name:   "a",
+					commit: commits["a"],
+				},
+				uniqueAncestors: []*jujutsu.Commit{
+					commits["c"],
+					commits["b"],
+				},
+			},
+		}
+		if diff := cmp.Diff(want, got, stackedDiffOption()); diff != "" {
 			t.Errorf("stack (-want +got):\n%s", diff)
 		}
 	})
@@ -122,10 +186,20 @@ func TestStackForBookmark(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := []localCommitRef{
-			{name: "a", commit: commits["a"]},
+		want := []stackedDiff{
+			{
+				localCommitRef: localCommitRef{
+					name:   "a",
+					commit: commits["a"],
+				},
+				uniqueAncestors: []*jujutsu.Commit{
+					commits["d"],
+					commits["c"],
+					commits["b"],
+				},
+			},
 		}
-		if diff := cmp.Diff(want, got, cmp.AllowUnexported(localCommitRef{})); diff != "" {
+		if diff := cmp.Diff(want, got, stackedDiffOption()); diff != "" {
 			t.Errorf("stack (-want +got):\n%s", diff)
 		}
 	})
@@ -170,6 +244,16 @@ func TestStackForBookmark(t *testing.T) {
 			t.Error("stackForBookmark did not return an error. Stack: main ←", strings.Join(names, " ← "))
 		}
 	})
+}
+
+func stackedDiffOption() cmp.Option {
+	return cmp.Options{
+		cmp.AllowUnexported(stackedDiff{}, localCommitRef{}),
+		cmp.FilterPath(func(p cmp.Path) bool {
+			return p.Index(-2).Type() == reflect.TypeFor[stackedDiff]() &&
+				p.Last().(cmp.StructField).Name() == "uniqueAncestors"
+		}, cmpopts.EquateEmpty()),
+	}
 }
 
 func createRepository(ctx context.Context, jj *jujutsu.Jujutsu) error {
