@@ -30,6 +30,7 @@ import (
 	"io"
 	"iter"
 	"log"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -37,7 +38,6 @@ import (
 	"gg-scm.io/pkg/git"
 	"github.com/alecthomas/kong"
 	jsonv2 "github.com/go-json-experiment/json"
-	"github.com/go-json-experiment/json/jsontext"
 	"github.com/shurcooL/githubv4"
 	"zombiezen.com/go/jj-domino/internal/jujutsu"
 )
@@ -46,6 +46,7 @@ type submitCmd struct {
 	Bookmark  string   `kong:"short=b,help=Push a stack with the bookmark as the head,placeholder=NAME,xor=revisions"`
 	Revisions []string `kong:"short=r,sep=none,help=Push stacks pointing to these commits (can be repeated) (default: trunk()..@),placeholder=REVSETS,xor=revisions"`
 	Changes   []string `kong:"name=change,short=c,sep=none,help=Push stacks by creating bookmarks (can be repeated),placeholder=REVSETS,xor=revisions"`
+	Editor    *bool    `kong:"negatable,help=Whether to open an editor on the pull request descriptions (defaults to only new PRs)"`
 	Draft     bool     `kong:"short=d,help=Mark first pull request in stack as draft"`
 	DryRun    bool     `kong:"short=n,help=Don\\'t send to GitHub"`
 	Remote    string   `kong:"help=The remote to push to,placeholder=REMOTE"`
@@ -53,12 +54,18 @@ type submitCmd struct {
 	Push      bool     `kong:"negatable,help=Push commits to GitHub (on by default),default=true"`
 }
 
+func (c *submitCmd) Validate() error {
+	if c.shouldCreatePushBookmarks() && !c.Push {
+		return errors.New("cannot combine --no-push with --change")
+	}
+	if c.DryRun && c.Editor != nil && *c.Editor {
+		return errors.New("cannot combine --editor with --dry-run")
+	}
+	return nil
+}
+
 func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 	const defaultPRNumberWidth = 3
-
-	if c.shouldCreatePushBookmarks() && !c.Push {
-		return fmt.Errorf("cannot combine --no-push with --change")
-	}
 
 	jj, err := jujutsu.New(jujutsu.Options{
 		Env: environMapToSlice(global.environ),
@@ -66,16 +73,9 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 	if err != nil {
 		return err
 	}
-	var jjSettings map[string]jsontext.Value
-	if c.Remote == "" || c.Base == "" {
-		// If the user fully specifies the base ref and remote,
-		// we do not need to read Jujutsu's settings.
-		// But in most cases, we need to.
-		var err error
-		jjSettings, err = jj.ReadSettings(ctx)
-		if err != nil {
-			return err
-		}
+	jjSettings, err := jj.ReadSettings(ctx)
+	if err != nil {
+		return err
 	}
 	pushRemoteName := c.Remote
 	if pushRemoteName == "" {
@@ -160,6 +160,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 	if err != nil {
 		return fmt.Errorf("push remote: %v", err)
 	}
+	pullRequestTemplate := readGitHubPullRequestTemplate(ctx, jj, stack[len(stack)-1].commit.ID.String())
 
 	token, err := gitHubToken(ctx, global.environ, global.lookPath)
 	if err != nil {
@@ -170,7 +171,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 		// We can still display the proposed PRs.
 		log.Printf("Unable to authenticate to GitHub: %v", err)
 
-		plan := planPullRequests(baseRepoPath, baseRef.Name, placeholderGitHubRepository(headRepoPath), stack)
+		plan := planPullRequests(baseRepoPath, baseRef.Name, pullRequestTemplate, placeholderGitHubRepository(headRepoPath), stack)
 		plan[0].IsDraft = githubv4.Boolean(c.Draft)
 		sb := new(strings.Builder)
 		for _, pr := range plan {
@@ -199,7 +200,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 		}
 	}
 
-	plan := planPullRequests(baseRepoPath, baseRef.Name, headRepo, stack)
+	plan := planPullRequests(baseRepoPath, baseRef.Name, pullRequestTemplate, headRepo, stack)
 	plan[0].IsDraft = githubv4.Boolean(c.Draft)
 
 	var baseRepo *gitHubRepository
@@ -223,8 +224,59 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 		return planError
 	}
 
-	isStdoutTerminal := isTerminal(k.Stdout)
+	// Edit pull request titles/bodies.
+	isNew := make([]bool, len(plan))
+	for i, pr := range plan {
+		isNew[i] = pr.ID == nil
+	}
+	if c.DryRun {
+		// In a dry run, we should surface to the user that an editor might fail
+		// and have unexpected consequences.
+		if _, err := jujutsuEditor(jjSettings); err != nil {
+			log.Printf("Warning: unable to determine editor: %v", err)
+		}
+	} else if c.Editor != nil && *c.Editor || c.Editor == nil && slices.Contains(isNew, true) {
+		if editorCommand, err := jujutsuEditor(jjSettings); err != nil {
+			if c.Editor != nil {
+				// User explicitly requested editor. Abort.
+				return err
+			}
+			log.Printf("Unable to determine editor (%v). Sending without editing...", err)
+		} else {
+			argv := editorCommand.Argv()
+			editorEnviron := maps.Clone(global.environ)
+			maps.Insert(editorEnviron, editorCommand.Environ())
+			e := &editor{
+				command: jujutsu.CommandArgv(argv[0], argv[1:], editorEnviron),
+				stdin:   global.stdin,
+				stdout:  k.Stdout,
+				stderr:  k.Stderr,
+				logError: func(ctx context.Context, err error) {
+					log.Println(err)
+				},
+			}
+			prsToEdit := plan
+			if c.Editor == nil {
+				// If the user didn't explicitly request an editor,
+				// only surface the new PRs.
+				prsToEdit = make([]*plannedPullRequest, 0, len(plan))
+				for i, pr := range plan {
+					if isNew[i] {
+						prsToEdit = append(prsToEdit, pr)
+					}
+				}
+			}
+			err := editPullRequestMessages(prsToEdit, func(initialContent []byte) ([]byte, error) {
+				log.Println("Opening editor for pull request descriptions...")
+				return e.open(ctx, "domino.jjdescription", initialContent)
+			})
+			if err != nil {
+				return err
+			}
+		}
+	}
 
+	// If we haven't already run push, then do so (in dry-run mode if requested).
 	if c.Push && !c.shouldCreatePushBookmarks() {
 		err := jjGitPush(ctx, jj, pushOutput, c.DryRun, pushRemoteName, func(yield func(string) bool) {
 			for _, pr := range plan {
@@ -239,6 +291,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 		io.WriteString(pushOutput, "\n")
 	}
 
+	isStdoutTerminal := isTerminal(k.Stdout)
 	if c.DryRun {
 		prNumberWidth := cmp.Or(maxIntWidth(func(yield func(githubv4.Int) bool) {
 			for _, pr := range plan {
@@ -273,9 +326,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 
 	// Create all the new pull requests first so we have the numbers.
 	// We need the pull request numbers/URLs for the stack footer.
-	isNew := make([]bool, len(plan))
 	for i, pr := range plan {
-		isNew[i] = pr.ID == nil
 		if !isNew[i] {
 			continue
 		}
@@ -491,7 +542,7 @@ type plannedPullRequest struct {
 	baseRepositoryPath gitHubRepositoryPath
 }
 
-func planPullRequests(baseRepoPath gitHubRepositoryPath, baseRefName string, headRepo *gitHubRepository, stack []stackedDiff) []*plannedPullRequest {
+func planPullRequests(baseRepoPath gitHubRepositoryPath, baseRefName string, template string, headRepo *gitHubRepository, stack []stackedDiff) []*plannedPullRequest {
 	plan := make([]*plannedPullRequest, 0, len(stack))
 	isFork := headRepo.path() != baseRepoPath
 	for i, diff := range stack {
@@ -510,6 +561,9 @@ func planPullRequests(baseRepoPath gitHubRepositoryPath, baseRefName string, hea
 				}
 			}
 		})
+		if template != "" {
+			body += "\n\n" + template
+		}
 		plan = append(plan, &plannedPullRequest{
 			baseRepositoryPath: baseRepoPath,
 			pullRequest: pullRequest{

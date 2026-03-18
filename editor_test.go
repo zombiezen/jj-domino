@@ -33,8 +33,413 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"zombiezen.com/go/jj-domino/internal/jujutsu"
 )
+
+func TestEditPullRequestMessages(t *testing.T) {
+	tests := []struct {
+		name          string
+		pullRequests  []*plannedPullRequest
+		editedContent string
+
+		want               []*plannedPullRequest
+		wantInitialContent string
+		err                bool
+	}{
+		{
+			name: "SinglePullRequest",
+			pullRequests: []*plannedPullRequest{
+				{
+					pullRequest: pullRequest{
+						HeadRefName: "zombiezen/foo",
+						Title:       "Hello World",
+						Body:        "This changes things.",
+					},
+				},
+			},
+			wantInitialContent: editorPreamble +
+				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+				"Hello World\n\n" +
+				"This changes things.\n\n" +
+				editorPostscript,
+			editedContent: editorPreamble +
+				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+				"Hello Universe\n\n" +
+				"This changes *EVERYTHING*.\n" +
+				editorPostscript,
+			want: []*plannedPullRequest{
+				{
+					pullRequest: pullRequest{
+						HeadRefName: "zombiezen/foo",
+						Title:       "Hello Universe",
+						Body:        "This changes *EVERYTHING*.",
+					},
+				},
+			},
+		},
+		{
+			name: "CommentsInBody",
+			pullRequests: []*plannedPullRequest{
+				{
+					pullRequest: pullRequest{
+						HeadRefName: "zombiezen/foo",
+						Title:       "Hello World",
+						Body:        "This changes things.",
+					},
+				},
+			},
+			wantInitialContent: editorPreamble +
+				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+				"Hello World\n\n" +
+				"This changes things.\n\n" +
+				editorPostscript,
+			editedContent: editorPreamble +
+				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+				"Hello Universe\n\n" +
+				"This changes *EVERYTHING*.\n" +
+				editorCommentPrefix + " Some choice commentary here.\n" +
+				"I can't believe it.\n" +
+				editorPostscript,
+			want: []*plannedPullRequest{
+				{
+					pullRequest: pullRequest{
+						HeadRefName: "zombiezen/foo",
+						Title:       "Hello Universe",
+						Body:        "This changes *EVERYTHING*.\nI can't believe it.",
+					},
+				},
+			},
+		},
+		{
+			name: "TrailingNewlinesInBody",
+			pullRequests: []*plannedPullRequest{
+				{
+					pullRequest: pullRequest{
+						HeadRefName: "zombiezen/foo",
+						Title:       "Hello World",
+						Body:        "This changes things.\n\n\n\n\n",
+					},
+				},
+			},
+			wantInitialContent: editorPreamble +
+				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+				"Hello World\n\n" +
+				"This changes things.\n\n" +
+				editorPostscript,
+			editedContent: editorPreamble +
+				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+				"Hello Universe\n\n" +
+				"This changes *EVERYTHING*.\n" +
+				editorPostscript,
+			want: []*plannedPullRequest{
+				{
+					pullRequest: pullRequest{
+						HeadRefName: "zombiezen/foo",
+						Title:       "Hello Universe",
+						Body:        "This changes *EVERYTHING*.",
+					},
+				},
+			},
+		},
+		{
+			name: "MissingMessage",
+			pullRequests: []*plannedPullRequest{
+				{
+					pullRequest: pullRequest{
+						HeadRefName: "zombiezen/foo",
+						Title:       "Hello World",
+						Body:        "This changes things.",
+					},
+				},
+			},
+			wantInitialContent: editorPreamble +
+				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+				"Hello World\n\n" +
+				"This changes things.\n\n" +
+				editorPostscript,
+			editedContent: editorPreamble +
+				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+				"\n \t \n\n" +
+				editorPostscript,
+			err: true,
+		},
+		{
+			name: "RemoveBody",
+			pullRequests: []*plannedPullRequest{
+				{
+					pullRequest: pullRequest{
+						HeadRefName: "zombiezen/foo",
+						Title:       "Hello World",
+						Body:        "This changes things.",
+					},
+				},
+			},
+			wantInitialContent: editorPreamble +
+				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+				"Hello World\n\n" +
+				"This changes things.\n\n" +
+				editorPostscript,
+			editedContent: editorPreamble +
+				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+				"Hello Nothing\n\n" +
+				editorPostscript,
+			want: []*plannedPullRequest{
+				{
+					pullRequest: pullRequest{
+						HeadRefName: "zombiezen/foo",
+						Title:       "Hello Nothing",
+						Body:        "",
+					},
+				},
+			},
+		},
+		{
+			name: "AddBody",
+			pullRequests: []*plannedPullRequest{
+				{
+					pullRequest: pullRequest{
+						HeadRefName: "zombiezen/foo",
+						Title:       "Hello World",
+					},
+				},
+			},
+			wantInitialContent: editorPreamble +
+				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+				"Hello World\n\n" +
+				editorPostscript,
+			editedContent: editorPreamble +
+				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+				"Hello new body\n\n" +
+				"wo\n" +
+				editorPostscript,
+			want: []*plannedPullRequest{
+				{
+					pullRequest: pullRequest{
+						HeadRefName: "zombiezen/foo",
+						Title:       "Hello new body",
+						Body:        "wo",
+					},
+				},
+			},
+		},
+		{
+			name: "DuplicateMarkers",
+			pullRequests: []*plannedPullRequest{
+				{
+					pullRequest: pullRequest{
+						HeadRefName: "zombiezen/foo",
+						Title:       "Hello World",
+						Body:        "This changes things.",
+					},
+				},
+			},
+			wantInitialContent: editorPreamble +
+				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+				"Hello World\n\n" +
+				"This changes things.\n\n" +
+				editorPostscript,
+			editedContent: editorPreamble +
+				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+				"Hello Universe\n\n" +
+				"This changes *EVERYTHING*.\n" +
+				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+				"Deja vu\n\n" +
+				editorPostscript,
+			err: true,
+		},
+		{
+			name: "ExtraMarker",
+			pullRequests: []*plannedPullRequest{
+				{
+					pullRequest: pullRequest{
+						HeadRefName: "zombiezen/foo",
+						Title:       "Hello World",
+						Body:        "This changes things.",
+					},
+				},
+			},
+			wantInitialContent: editorPreamble +
+				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+				"Hello World\n\n" +
+				"This changes things.\n\n" +
+				editorPostscript,
+			editedContent: editorPreamble +
+				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+				"Hello Universe\n\n" +
+				"This changes *EVERYTHING*.\n" +
+				editorSeparatorPrefix + "zombiezen/bar" + editorSeparatorSuffix +
+				"zombiezen, what is this?\n\n" +
+				editorPostscript,
+			err: true,
+		},
+		{
+			name: "MultiplePullRequests",
+			pullRequests: []*plannedPullRequest{
+				{
+					pullRequest: pullRequest{
+						HeadRefName: "zombiezen/foo",
+						Title:       "Hello World",
+						Body:        "This changes things.",
+					},
+				},
+				{
+					pullRequest: pullRequest{
+						HeadRefName: "zombiezen/bar",
+						Title:       "Endgame",
+						Body:        "Checkmate!",
+					},
+				},
+			},
+			wantInitialContent: editorPreamble +
+				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+				"Hello World\n\n" +
+				"This changes things.\n\n" +
+				editorSeparatorPrefix + "zombiezen/bar" + editorSeparatorSuffix +
+				"Endgame\n\n" +
+				"Checkmate!\n\n" +
+				editorPostscript,
+			editedContent: editorPreamble +
+				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+				"Hello Universe\n\n" +
+				"This changes *EVERYTHING*.\n" +
+				editorSeparatorPrefix + "zombiezen/bar" + editorSeparatorSuffix +
+				"Close to Endgame\n\n" +
+				"Check\n\n" +
+				editorPostscript,
+			want: []*plannedPullRequest{
+				{
+					pullRequest: pullRequest{
+						HeadRefName: "zombiezen/foo",
+						Title:       "Hello Universe",
+						Body:        "This changes *EVERYTHING*.",
+					},
+				},
+				{
+					pullRequest: pullRequest{
+						HeadRefName: "zombiezen/bar",
+						Title:       "Close to Endgame",
+						Body:        "Check",
+					},
+				},
+			},
+		},
+		{
+			name: "MultiplePullRequestsReordered",
+			pullRequests: []*plannedPullRequest{
+				{
+					pullRequest: pullRequest{
+						HeadRefName: "zombiezen/foo",
+						Title:       "Hello World",
+						Body:        "This changes things.",
+					},
+				},
+				{
+					pullRequest: pullRequest{
+						HeadRefName: "zombiezen/bar",
+						Title:       "Endgame",
+						Body:        "Checkmate!",
+					},
+				},
+			},
+			wantInitialContent: editorPreamble +
+				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+				"Hello World\n\n" +
+				"This changes things.\n\n" +
+				editorSeparatorPrefix + "zombiezen/bar" + editorSeparatorSuffix +
+				"Endgame\n\n" +
+				"Checkmate!\n\n" +
+				editorPostscript,
+			editedContent: editorPreamble +
+				editorSeparatorPrefix + "zombiezen/bar" + editorSeparatorSuffix +
+				"Close to Endgame\n\n" +
+				"Check\n\n" +
+				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+				"Hello Universe\n\n" +
+				"This changes *EVERYTHING*.\n" +
+				editorPostscript,
+			want: []*plannedPullRequest{
+				{
+					pullRequest: pullRequest{
+						HeadRefName: "zombiezen/foo",
+						Title:       "Hello Universe",
+						Body:        "This changes *EVERYTHING*.",
+					},
+				},
+				{
+					pullRequest: pullRequest{
+						HeadRefName: "zombiezen/bar",
+						Title:       "Close to Endgame",
+						Body:        "Check",
+					},
+				},
+			},
+		},
+		{
+			name: "MissingMarker",
+			pullRequests: []*plannedPullRequest{
+				{
+					pullRequest: pullRequest{
+						HeadRefName: "zombiezen/foo",
+						Title:       "Hello World",
+						Body:        "This changes things.",
+					},
+				},
+				{
+					pullRequest: pullRequest{
+						HeadRefName: "zombiezen/bar",
+						Title:       "Endgame",
+						Body:        "Checkmate!",
+					},
+				},
+			},
+			wantInitialContent: editorPreamble +
+				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+				"Hello World\n\n" +
+				"This changes things.\n\n" +
+				editorSeparatorPrefix + "zombiezen/bar" + editorSeparatorSuffix +
+				"Endgame\n\n" +
+				"Checkmate!\n\n" +
+				editorPostscript,
+			editedContent: editorPreamble +
+				editorSeparatorPrefix + "zombiezen/bar" + editorSeparatorSuffix +
+				"Close to Endgame\n\n" +
+				"Check\n\n" +
+				editorPostscript,
+			err: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			prs := make([]*plannedPullRequest, len(test.pullRequests))
+			for i, pr := range test.pullRequests {
+				prs[i] = new(*pr)
+			}
+			err := editPullRequestMessages(prs, func(initialContent []byte) ([]byte, error) {
+				if diff := cmp.Diff(test.wantInitialContent, string(initialContent)); diff != "" {
+					t.Errorf("initial editor content (-want +got):\n%s", diff)
+				}
+				return []byte(test.editedContent), nil
+			})
+			if err != nil {
+				t.Log("editPullRequestMessages:", err)
+				if !test.err {
+					t.Fail()
+				}
+			}
+			if test.err {
+				if err == nil {
+					t.Error("editPullRequestMessages did not return an error")
+				}
+				return
+			}
+			if diff := cmp.Diff(test.want, prs, cmp.AllowUnexported(plannedPullRequest{})); diff != "" {
+				t.Errorf("pull requests (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
 
 func TestEditor(t *testing.T) {
 	ctx := t.Context()

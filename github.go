@@ -26,12 +26,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
 
 	"gg-scm.io/pkg/git"
 	"github.com/shurcooL/githubv4"
+	"zombiezen.com/go/jj-domino/internal/jujutsu"
 )
 
 type gitHubRepositoryPath struct {
@@ -265,6 +267,31 @@ func updatePullRequestDraftStatus(ctx context.Context, client *githubv4.Client, 
 	}
 
 	return nil
+}
+
+func readGitHubPullRequestTemplate(ctx context.Context, jj *jujutsu.Jujutsu, revision string) string {
+	potential := []string{
+		"root-file:pull_request_template.md",
+		"root-file:PULL_REQUEST_TEMPLATE/pull_request_template.md",
+		"root-file:docs/pull_request_template.md",
+		"root-file:docs/PULL_REQUEST_TEMPLATE/pull_request_template.md",
+		"root-file:.github/pull_request_template.md",
+		"root-file:.github/PULL_REQUEST_TEMPLATE/pull_request_template.md",
+	}
+	for _, p := range potential {
+		rc, err := jj.ShowFile(ctx, revision, p)
+		if err != nil {
+			continue
+		}
+		content := new(strings.Builder)
+		_, err = io.Copy(content, rc)
+		rc.Close()
+		if err != nil {
+			continue
+		}
+		return content.String()
+	}
+	return ""
 }
 
 var errPullRequestNotFound = errors.New("pull request not found")
