@@ -289,7 +289,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 		io.WriteString(pushOutput, "\n")
 	}
 
-	isStdoutTerminal := isTerminal(k.Stdout)
+	stdoutANSIEscapes := useANSIEscapes(k.Stdout, lookupEnvMapFunc(global.environ))
 	if c.DryRun {
 		prNumberWidth := cmp.Or(maxIntWidth(func(yield func(githubv4.Int) bool) {
 			for _, pr := range plan {
@@ -302,7 +302,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 		}), defaultPRNumberWidth)
 		sb := new(strings.Builder)
 		for _, pr := range plan {
-			pr.writeLogLine(sb, prNumberWidth, isStdoutTerminal)
+			pr.writeLogLine(sb, prNumberWidth, stdoutANSIEscapes)
 			if pr.ID == nil {
 				sb.WriteString(" (new)")
 			}
@@ -336,7 +336,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 			yield(pr.Number)
 		}))
 		sb := new(strings.Builder)
-		pr.writeLogLine(sb, prNumberWidth, isStdoutTerminal)
+		pr.writeLogLine(sb, prNumberWidth, stdoutANSIEscapes)
 		sb.WriteString(" (new)\n")
 		io.WriteString(k.Stdout, sb.String())
 	}
@@ -359,7 +359,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 			}
 
 			sb := new(strings.Builder)
-			pr.writeLogLine(sb, prNumberWidth, isStdoutTerminal)
+			pr.writeLogLine(sb, prNumberWidth, stdoutANSIEscapes)
 			sb.WriteString("\n")
 			io.WriteString(k.Stdout, sb.String())
 		}
