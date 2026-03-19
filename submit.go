@@ -67,9 +67,7 @@ func (c *submitCmd) Validate() error {
 func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 	const defaultPRNumberWidth = 3
 
-	jj, err := jujutsu.New(jujutsu.Options{
-		Env: environMapToSlice(global.environ),
-	})
+	jj, err := global.newJujutsu()
 	if err != nil {
 		return err
 	}
