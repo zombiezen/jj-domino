@@ -23,9 +23,7 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -34,10 +32,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"slices"
+	"strings"
 
 	"github.com/alecthomas/kong"
 	"github.com/shurcooL/githubv4"
+	"golang.org/x/term"
 	"zombiezen.com/go/jj-domino/internal/cmderror"
 	"zombiezen.com/go/jj-domino/internal/sigterm"
 	"zombiezen.com/go/log"
@@ -103,23 +102,28 @@ func (c *authGitHubLoginCmd) Run(ctx context.Context, k *kong.Kong, global *cli)
 		io.WriteString(k.Stderr, "Token: ")
 	}
 
-	s := bufio.NewScanner(global.stdin)
-	scanChan := make(chan bool)
+	type readResult struct {
+		s   string
+		err error
+	}
+	readChan := make(chan readResult)
 	go func() {
-		scanChan <- s.Scan()
+		var result readResult
+		result.s, result.err = readPassword(global.stdin, lookupEnvMapFunc(global.environ))
+		readChan <- result
 	}()
+	var token string
 	select {
-	case ok := <-scanChan:
-		if !ok {
-			err := cmp.Or(s.Err(), io.EOF)
-			return err
+	case result := <-readChan:
+		if result.err != nil {
+			return result.err
 		}
+		token = strings.TrimSpace(result.s)
 	case <-ctx.Done():
 		// Leaks a goroutine, but we'll exit soon anyway.
 		io.WriteString(k.Stderr, "\n")
 		return ctx.Err()
 	}
-	token := bytes.TrimSpace(s.Bytes())
 	if len(token) == 0 {
 		return errors.New("no token entered")
 	}
@@ -127,7 +131,10 @@ func (c *authGitHubLoginCmd) Run(ctx context.Context, k *kong.Kong, global *cli)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, append(slices.Clip(token), '\n'), 0o600); err != nil {
+	fileContent := make([]byte, 0, len(token)+1)
+	fileContent = append(fileContent, token...)
+	fileContent = append(fileContent, '\n')
+	if err := os.WriteFile(path, fileContent, 0o600); err != nil {
 		return err
 	}
 
@@ -172,4 +179,45 @@ func gitHubToken(ctx context.Context, environ map[string]string, lookPath lookPa
 		return "", cmderror.New("gh auth token", err, stderr.Bytes())
 	}
 	return string(bytes.TrimSpace(raw)), nil
+}
+
+func readPassword(r io.Reader, lookupEnv lookupEnvFunc) (string, error) {
+	if f, ok := r.(*os.File); ok {
+		if fd, ok := asTerminal(f, lookupEnv); ok {
+			token, err := term.ReadPassword(fd)
+			f.WriteString("\n") // Newline from read doesn't get echoed.
+			return string(token), err
+		}
+	}
+
+	br, ok := r.(io.ByteReader)
+	if !ok {
+		br = byteReader{r}
+	}
+
+	sb := new(strings.Builder)
+	for {
+		b, err := br.ReadByte()
+		if b == '\n' || err != nil {
+			if err == io.EOF && sb.Len() > 0 {
+				err = nil
+			}
+			s := sb.String()
+			if runtime.GOOS == "windows" {
+				s = strings.TrimSuffix(s, "\r")
+			}
+			return s, err
+		}
+		sb.WriteByte(b)
+	}
+}
+
+type byteReader struct {
+	io.Reader
+}
+
+func (br byteReader) ReadByte() (byte, error) {
+	var buf [1]byte
+	_, err := io.ReadFull(br.Reader, buf[:])
+	return buf[0], err
 }
