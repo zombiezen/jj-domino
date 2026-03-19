@@ -64,6 +64,19 @@ func (path gitHubRepositoryPath) String() string {
 	return url.PathEscape(path.Owner) + "/" + url.PathEscape(path.Repo)
 }
 
+// gitHubAuthenticatedUser returns the username associated with the client's authentication token.
+func gitHubAuthenticatedUser(ctx context.Context, client *githubv4.Client) (githubv4.String, error) {
+	var query struct {
+		Viewer struct {
+			Login githubv4.String
+		}
+	}
+	if err := client.Query(ctx, &query, nil); err != nil {
+		return "", fmt.Errorf("get github user: %v", err)
+	}
+	return query.Viewer.Login, nil
+}
+
 type pullRequest struct {
 	ID      githubv4.ID
 	Number  githubv4.Int

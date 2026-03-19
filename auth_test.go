@@ -43,6 +43,12 @@ func TestAuthGitHubLoginCmd(t *testing.T) {
 			"AppData":         configHome,
 		},
 		lookPath: stubLookPath,
+
+		Auth: authCmd{
+			GitHubLogin: authGitHubLoginCmd{
+				Verify: false,
+			},
+		},
 	}
 
 	ctx := testContext(t)
