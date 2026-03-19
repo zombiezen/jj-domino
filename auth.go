@@ -40,6 +40,7 @@ import (
 	"github.com/shurcooL/githubv4"
 	"zombiezen.com/go/jj-domino/internal/cmderror"
 	"zombiezen.com/go/jj-domino/internal/sigterm"
+	"zombiezen.com/go/log"
 	"zombiezen.com/go/xdgdir"
 )
 
@@ -131,7 +132,7 @@ func (c *authGitHubLoginCmd) Run(ctx context.Context, k *kong.Kong, global *cli)
 	}
 
 	if !c.Quiet {
-		fmt.Fprintf(k.Stderr, "Wrote GitHub token to %s\n", path)
+		log.Infof(ctx, "Wrote GitHub token to %s", path)
 	}
 	return nil
 }

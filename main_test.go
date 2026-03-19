@@ -24,16 +24,24 @@ package main
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
+
+	"zombiezen.com/go/log/testlog"
 )
+
+func TestMain(m *testing.M) {
+	testlog.Main(nil)
+	os.Exit(m.Run())
+}
 
 // testContext returns a [context.Context] that is canceled
 // just before Cleanup-registered functions are called
 // or shortly before the test deadline,
 // whichever comes first.
 func testContext(tb testing.TB) context.Context {
-	ctx := tb.Context()
+	ctx := testlog.WithTB(tb.Context(), tb)
 	deadline, ok := tbDeadline(tb)
 	if !ok {
 		return ctx

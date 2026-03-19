@@ -23,22 +23,24 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"iter"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/alecthomas/kong"
 	"golang.org/x/term"
 	"zombiezen.com/go/jj-domino/internal/jujutsu"
 	"zombiezen.com/go/jj-domino/internal/sigterm"
+	"zombiezen.com/go/log"
 	"zombiezen.com/go/xdgdir"
 )
 
@@ -46,6 +48,8 @@ type cli struct {
 	stdin    io.Reader         `kong:"-"`
 	environ  map[string]string `kong:"-"`
 	lookPath lookPathFunc      `kong:"-"`
+
+	Debug bool `kong:"help=Show debug logs"`
 
 	Submit submitCmd `kong:"cmd,default=withargs,help=Submit a review stack"`
 	Auth   authCmd   `kong:"cmd,help=Manage credentials"`
@@ -63,18 +67,38 @@ func (c *cli) newJujutsu() (*jujutsu.Jujutsu, error) {
 }
 
 func main() {
+	ctx, cancel := sigterm.NotifyContext(context.Background())
+
 	c := &cli{
 		stdin:    os.Stdin,
 		environ:  environMap(),
 		lookPath: exec.LookPath,
 	}
-	k := kong.Parse(c, kong.UsageOnError())
-	ctx, cancel := sigterm.NotifyContext(context.Background())
-	k.BindTo(ctx, (*context.Context)(nil))
-	err := k.Run()
+	k := kong.Must(c, kong.UsageOnError())
+
+	var logger log.Logger = &logger{
+		out:   os.Stderr,
+		color: useColors(os.Stderr, lookupEnvMapFunc(c.environ)),
+	}
+
+	kc, err := k.Parse(os.Args[1:])
+	if !c.Debug {
+		logger = &log.LevelFilter{
+			Min:    log.Info,
+			Output: logger,
+		}
+	}
+	log.SetDefault(logger)
+	if err != nil {
+		log.Errorf(ctx, "%v", err)
+		os.Exit(1)
+	}
+	kc.BindTo(ctx, (*context.Context)(nil))
+	err = kc.Run()
 	cancel()
 	if err != nil {
-		log.Fatal(err)
+		log.Errorf(ctx, "%v", err)
+		os.Exit(1)
 	}
 }
 
@@ -142,9 +166,60 @@ func windowsConfigHome(lookupEnv lookupEnvFunc) (string, error) {
 	return appData, nil
 }
 
+type logger struct {
+	color bool
+
+	mu  sync.Mutex
+	out io.Writer
+	buf []byte
+}
+
+// Log implements [log.Logger].
+func (l *logger) Log(ctx context.Context, e log.Entry) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.buf = l.buf[:0]
+	l.buf = append(l.buf, "jj-domino: "...)
+	switch {
+	case e.Level >= log.Error:
+		if l.color {
+			l.buf = append(l.buf, csi+"31m"...) // red
+		}
+		l.buf = append(l.buf, "error:"...)
+		if l.color {
+			l.buf = append(l.buf, csi+"39m"...) // default foreground color
+		}
+		l.buf = append(l.buf, ' ')
+	case e.Level >= log.Warn:
+		if l.color {
+			l.buf = append(l.buf, csi+"33m"...) // yellow
+		}
+		l.buf = append(l.buf, "warning:"...)
+		if l.color {
+			l.buf = append(l.buf, csi+"39m"...) // default foreground color
+		}
+		l.buf = append(l.buf, ' ')
+	}
+	l.buf = append(l.buf, e.Msg...)
+	if !bytes.HasSuffix(l.buf, []byte("\n")) {
+		l.buf = append(l.buf, '\n')
+	}
+
+	l.out.Write(l.buf)
+}
+
+// LogEnabled implements [log.Logger].
+func (l *logger) LogEnabled(log.Entry) bool {
+	return true
+}
+
 // ANSI escape codes.
-// Details about hyperlinks at https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda
+// See https://en.wikipedia.org/wiki/ANSI_escape_code
+// and details about hyperlinks at https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda
 const (
+	// csi is the Control Sequence Introducer (CSI) escape sequence.
+	csi = "\x1b["
 	// osc is the escape sequence for an Operating System Command (OSC).
 	osc = "\x1b]"
 	// st is the escape sequence for a String Terminator (ST).
@@ -157,6 +232,10 @@ const (
 func useANSIEscapes(f io.Writer, lookupEnv lookupEnvFunc) bool {
 	osFile, ok := f.(*os.File)
 	return ok && term.IsTerminal(int(osFile.Fd())) && lookupEnv.get("TERM") != "dumb"
+}
+
+func useColors(f io.Writer, lookupEnv lookupEnvFunc) bool {
+	return useANSIEscapes(f, lookupEnv) && lookupEnv.get("NO_COLOR") == ""
 }
 
 // environMap returns the environment variables as a map.

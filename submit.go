@@ -29,7 +29,6 @@ import (
 	"fmt"
 	"io"
 	"iter"
-	"log"
 	"maps"
 	"slices"
 	"strconv"
@@ -40,6 +39,7 @@ import (
 	jsonv2 "github.com/go-json-experiment/json"
 	"github.com/shurcooL/githubv4"
 	"zombiezen.com/go/jj-domino/internal/jujutsu"
+	"zombiezen.com/go/log"
 )
 
 type submitCmd struct {
@@ -167,7 +167,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 		}
 		// If we're doing a dry run, don't worry about GitHub API.
 		// We can still display the proposed PRs.
-		log.Printf("Unable to authenticate to GitHub: %v", err)
+		log.Warnf(ctx, "Unable to authenticate to GitHub: %v", err)
 
 		plan := planPullRequests(baseRepoPath, baseRef.Name, pullRequestTemplate, placeholderGitHubRepository(headRepoPath), stack)
 		plan[0].IsDraft = githubv4.Boolean(c.Draft)
@@ -231,7 +231,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 		// In a dry run, we should surface to the user that an editor might fail
 		// and have unexpected consequences.
 		if _, err := jujutsuEditor(jjSettings); err != nil {
-			log.Printf("Warning: unable to determine editor: %v", err)
+			log.Warnf(ctx, "Unable to determine editor: %v", err)
 		}
 	} else if c.Editor != nil && *c.Editor || c.Editor == nil && slices.Contains(isNew, true) {
 		if editorCommand, err := jujutsuEditor(jjSettings); err != nil {
@@ -239,7 +239,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 				// User explicitly requested editor. Abort.
 				return err
 			}
-			log.Printf("Unable to determine editor (%v). Sending without editing...", err)
+			log.Warnf(ctx, "Unable to determine editor (%v). Sending without editing...", err)
 		} else {
 			argv := editorCommand.Argv()
 			editorEnviron := maps.Clone(global.environ)
@@ -250,7 +250,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 				stdout:  k.Stdout,
 				stderr:  k.Stderr,
 				logError: func(ctx context.Context, err error) {
-					log.Println(err)
+					log.Errorf(ctx, "%v", err)
 				},
 			}
 			prsToEdit := plan
@@ -265,7 +265,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 				}
 			}
 			err := editPullRequestMessages(prsToEdit, func(initialContent []byte) ([]byte, error) {
-				log.Println("Opening editor for pull request descriptions...")
+				log.Infof(ctx, "Opening editor for pull request descriptions...")
 				return e.open(ctx, "domino.jjdescription", initialContent)
 			})
 			if err != nil {
@@ -355,7 +355,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 		if !isNew[i] {
 			if err := updatePullRequestDraftStatus(ctx, gitHubClient, baseRepoPath, &pr.pullRequest); err != nil {
 				// Not a fatal error: the pull request still exists.
-				log.Print(err)
+				log.Warnf(ctx, "%v", err)
 			}
 
 			sb := new(strings.Builder)
