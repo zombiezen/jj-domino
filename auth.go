@@ -103,9 +103,20 @@ func (c *authGitHubLoginCmd) Run(ctx context.Context, k *kong.Kong, global *cli)
 	}
 
 	s := bufio.NewScanner(global.stdin)
-	if !s.Scan() {
-		err := cmp.Or(s.Err(), io.EOF)
-		return err
+	scanChan := make(chan bool)
+	go func() {
+		scanChan <- s.Scan()
+	}()
+	select {
+	case ok := <-scanChan:
+		if !ok {
+			err := cmp.Or(s.Err(), io.EOF)
+			return err
+		}
+	case <-ctx.Done():
+		// Leaks a goroutine, but we'll exit soon anyway.
+		io.WriteString(k.Stderr, "\n")
+		return ctx.Err()
 	}
 	token := bytes.TrimSpace(s.Bytes())
 	if len(token) == 0 {
