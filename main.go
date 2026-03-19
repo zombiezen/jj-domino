@@ -232,9 +232,22 @@ const (
 	endLink = osc + "8;;" + st
 )
 
+func asTerminal(f *os.File, lookupEnv lookupEnvFunc) (int, bool) {
+	fd := int(f.Fd())
+	if term.IsTerminal(fd) && lookupEnv.get("TERM") != "dumb" {
+		return fd, true
+	} else {
+		return -1, false
+	}
+}
+
 func useANSIEscapes(f io.Writer, lookupEnv lookupEnvFunc) bool {
 	osFile, ok := f.(*os.File)
-	return ok && term.IsTerminal(int(osFile.Fd())) && lookupEnv.get("TERM") != "dumb"
+	if !ok {
+		return false
+	}
+	_, ok = asTerminal(osFile, lookupEnv)
+	return ok
 }
 
 func useColors(f io.Writer, lookupEnv lookupEnvFunc) bool {
