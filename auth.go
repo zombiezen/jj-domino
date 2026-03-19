@@ -40,6 +40,7 @@ import (
 	"github.com/shurcooL/githubv4"
 	"zombiezen.com/go/jj-domino/internal/cmderror"
 	"zombiezen.com/go/jj-domino/internal/sigterm"
+	"zombiezen.com/go/log"
 	"zombiezen.com/go/xdgdir"
 )
 
@@ -131,7 +132,7 @@ func (c *authGitHubLoginCmd) Run(ctx context.Context, k *kong.Kong, global *cli)
 	}
 
 	if !c.Quiet {
-		fmt.Fprintf(k.Stderr, "Wrote GitHub token to %s\n", path)
+		log.Infof(ctx, "Wrote GitHub token to %s", path)
 	}
 	return nil
 }
@@ -141,10 +142,12 @@ func gitHubToken(ctx context.Context, environ map[string]string, lookPath lookPa
 	const varName = "GITHUB_TOKEN"
 
 	if token := environ[varName]; token != "" {
+		log.Debugf(ctx, "Using GitHub API token from %s environment variable", varName)
 		return token, nil
 	}
 
-	if tokenData, err := readConfigFile(lookupEnvMapFunc(environ), "github-token"); err == nil {
+	if tokenData, err := readConfigFile(ctx, lookupEnvMapFunc(environ), "github-token"); err == nil {
+		log.Debugf(ctx, "Using GitHub API token from configuration file")
 		return string(bytes.TrimSpace(tokenData)), nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", err
@@ -158,6 +161,7 @@ func gitHubToken(ctx context.Context, environ map[string]string, lookPath lookPa
 		}
 		return "", fmt.Errorf("gh auth token: %v", err)
 	}
+	log.Debugf(ctx, "Calling gh CLI (%s) to get token", ghExe)
 	cmd := exec.CommandContext(ctx, ghExe, "auth", "token", "--hostname=github.com")
 	cmd.Env = environMapToSlice(environ)
 	cmd.Cancel = func() error { return sigterm.CancelProcess(cmd.Process) }

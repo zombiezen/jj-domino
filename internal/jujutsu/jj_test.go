@@ -32,10 +32,10 @@ import (
 )
 
 func TestShowFile(t *testing.T) {
-	ctx := t.Context()
 	jjExe := findJJExecutable(t)
 
 	t.Run("Exists", func(t *testing.T) {
+		ctx := t.Context()
 		repoDir := t.TempDir()
 		jj, err := New(Options{
 			Dir:   repoDir,
@@ -70,6 +70,7 @@ func TestShowFile(t *testing.T) {
 	})
 
 	t.Run("DoesNotExist", func(t *testing.T) {
+		ctx := t.Context()
 		repoDir := t.TempDir()
 		jj, err := New(Options{
 			Dir:   repoDir,

@@ -11,6 +11,7 @@ require (
 	golang.org/x/sys v0.42.0
 	golang.org/x/term v0.40.0
 	mvdan.cc/sh/v3 v3.13.0
+	zombiezen.com/go/log v1.2.0
 	zombiezen.com/go/xdgdir v1.0.0
 )
 

@@ -442,7 +442,7 @@ func TestEditPullRequestMessages(t *testing.T) {
 }
 
 func TestEditor(t *testing.T) {
-	ctx := t.Context()
+	ctx := testContext(t)
 
 	const want = "I edited it!\n"
 	command, err := editorCommand(t, []byte(want))
@@ -472,7 +472,7 @@ func TestEditor(t *testing.T) {
 }
 
 func TestEditorDirectory(t *testing.T) {
-	ctx := t.Context()
+	ctx := testContext(t)
 
 	var command *jujutsu.CommandNameAndArgs
 	if runtime.GOOS == "windows" {

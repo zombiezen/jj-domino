@@ -34,6 +34,7 @@ import (
 	"gg-scm.io/pkg/git"
 	"github.com/shurcooL/githubv4"
 	"zombiezen.com/go/jj-domino/internal/jujutsu"
+	"zombiezen.com/go/log"
 )
 
 type gitHubRepositoryPath struct {
@@ -94,6 +95,7 @@ func fetchRepository(ctx context.Context, client *githubv4.Client, path gitHubRe
 	var query struct {
 		Repository *gitHubRepository `graphql:"repository(owner: $owner, name: $name)"`
 	}
+	log.Debugf(ctx, "Getting information about %v...", path)
 	err := client.Query(ctx, &query, map[string]any{
 		"owner": githubv4.String(path.Owner),
 		"name":  githubv4.String(path.Repo),
@@ -156,6 +158,7 @@ func findOpenPullRequestForHead(ctx context.Context, client *githubv4.Client, ba
 				} `graphql:"pullRequests(headRefName: $headRef, states: [OPEN], first: 50, after: $cursor)"`
 			} `graphql:"repository(owner: $baseOwner, name: $baseRepo)"`
 		}
+		log.Debugf(ctx, "Searching for open pull requests on %v for %s...", baseRepoPath, headRef)
 		if err := client.Query(ctx, &query, vars); err != nil {
 			// Make error opaque.
 			return nil, nil, errors.New(err.Error())
@@ -194,6 +197,12 @@ func createPullRequest(ctx context.Context, client *githubv4.Client, baseRepo *g
 		} `graphql:"createPullRequest(input: $input)"`
 	}
 
+	qualifiedHeadRef := pr.HeadRefName
+	if pr.HeadRepository.ID != baseRepo.ID {
+		qualifiedHeadRef = pr.HeadRepository.Owner.Login + ":" + pr.HeadRefName
+	}
+	log.Debugf(ctx, "Creating pull request on %v for %s ← %s...",
+		baseRepo.path(), pr.BaseRefName, qualifiedHeadRef)
 	err := client.Mutate(ctx, &mutation, githubv4.CreatePullRequestInput{
 		RepositoryID: baseRepo.ID,
 		Title:        pr.Title,
@@ -205,10 +214,6 @@ func createPullRequest(ctx context.Context, client *githubv4.Client, baseRepo *g
 		HeadRepositoryID: new(pr.HeadRepository.ID),
 	}, nil)
 	if err != nil {
-		qualifiedHeadRef := pr.HeadRefName
-		if pr.HeadRepository.ID != baseRepo.ID {
-			qualifiedHeadRef = pr.HeadRepository.Owner.Login + ":" + pr.HeadRefName
-		}
 		return fmt.Errorf("create pull request on %v for %s: %v", baseRepo.path(), qualifiedHeadRef, err)
 	}
 
@@ -226,6 +231,7 @@ func updatePullRequest(ctx context.Context, client *githubv4.Client, baseRepoPat
 		} `graphql:"updatePullRequest(input: $input)"`
 	}
 
+	log.Debugf(ctx, "Updating %v#%d body and base ref = %s...", baseRepoPath, pr.Number, pr.BaseRefName)
 	err := client.Mutate(ctx, &mutation, githubv4.UpdatePullRequestInput{
 		PullRequestID: pr.ID,
 		Body:          new(pr.Body),
@@ -246,6 +252,7 @@ func updatePullRequestDraftStatus(ctx context.Context, client *githubv4.Client, 
 				_ struct{} `graphql:"..."`
 			} `graphql:"convertPullRequestToDraft(input: $input)"`
 		}
+		log.Debugf(ctx, "Converting %v#%d to draft...", baseRepoPath, pr.Number)
 		err := client.Mutate(ctx, &mutation, githubv4.ConvertPullRequestToDraftInput{
 			PullRequestID: pr.ID,
 		}, nil)
@@ -258,6 +265,7 @@ func updatePullRequestDraftStatus(ctx context.Context, client *githubv4.Client, 
 				_ struct{} `graphql:"..."`
 			} `graphql:"markPullRequestReadyForReview(input: $input)"`
 		}
+		log.Debugf(ctx, "Marking %v#%d as ready for review...", baseRepoPath, pr.Number)
 		err := client.Mutate(ctx, &mutation, githubv4.MarkPullRequestReadyForReviewInput{
 			PullRequestID: pr.ID,
 		}, nil)
@@ -281,6 +289,7 @@ func readGitHubPullRequestTemplate(ctx context.Context, jj *jujutsu.Jujutsu, rev
 	for _, p := range potential {
 		rc, err := jj.ShowFile(ctx, revision, p)
 		if err != nil {
+			log.Debugf(ctx, "Find pull request template: %v", err)
 			continue
 		}
 		content := new(strings.Builder)
