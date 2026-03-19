@@ -100,17 +100,17 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 			return fmt.Errorf("--base=%s does not have an associated remote", c.Base)
 		}
 	} else {
-		var trunkRevset string
-		if err := jsonv2.Unmarshal(jjSettings[`revset-aliases."trunk()"`], &trunkRevset); err != nil {
-			return fmt.Errorf("trunk: %v", err)
-		}
-		var err error
-		baseRef, err = jujutsu.ParseRefSymbol(trunkRevset)
+		// TODO(someday): Deduplicate bookmark listing.
+		bookmarks, err := jj.ListBookmarks(ctx)
 		if err != nil {
-			return fmt.Errorf("trunk %q: %v", trunkRevset, err)
+			return err
+		}
+		baseRef, err = resolveTrunk(jjSettings, bookmarks)
+		if err != nil {
+			return err
 		}
 		if baseRef.Remote == "" {
-			return fmt.Errorf("trunk() does not have an associated remote")
+			return fmt.Errorf("trunk() (%v) does not have an associated remote", baseRef)
 		}
 	}
 
