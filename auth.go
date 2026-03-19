@@ -94,7 +94,7 @@ func (c *authGitHubLoginCmd) Run(ctx context.Context, k *kong.Kong, global *cli)
 
 	if !c.Quiet {
 		const url = "https://github.com/settings/tokens/new?scopes=repo"
-		if isTerminal(k.Stderr) {
+		if useANSIEscapes(k.Stderr, lookupEnvMapFunc(global.environ)) {
 			io.WriteString(k.Stderr, "Visit "+osc+"8;;"+url+st+url+endLink+" to generate a new GitHub token.\n")
 		} else {
 			io.WriteString(k.Stderr, "Visit "+url+" to generate a new GitHub token.\n")

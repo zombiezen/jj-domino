@@ -154,9 +154,9 @@ const (
 	endLink = osc + "8;;" + st
 )
 
-func isTerminal(f io.Writer) bool {
+func useANSIEscapes(f io.Writer, lookupEnv lookupEnvFunc) bool {
 	osFile, ok := f.(*os.File)
-	return ok && term.IsTerminal(int(osFile.Fd()))
+	return ok && term.IsTerminal(int(osFile.Fd())) && lookupEnv.get("TERM") != "dumb"
 }
 
 // environMap returns the environment variables as a map.
