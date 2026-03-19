@@ -60,21 +60,18 @@ func (c *authStatusCmd) Run(ctx context.Context, k *kong.Kong, global *cli) erro
 	defer httpClient.CloseIdleConnections()
 	client := githubv4.NewClient(httpClient)
 
-	var query struct {
-		Viewer struct {
-			Login githubv4.String
-		}
-	}
-	if err := client.Query(ctx, &query, nil); err != nil {
+	username, err := gitHubAuthenticatedUser(ctx, client)
+	if err != nil {
 		return err
 	}
 
-	fmt.Fprintf(k.Stdout, "Authenticated as: %s\n", query.Viewer.Login)
+	fmt.Fprintf(k.Stdout, "Authenticated as %s\n", username)
 	return nil
 }
 
 type authGitHubLoginCmd struct {
-	Quiet bool `kong:"short=q,help=Don\\'t print out prompt"`
+	Quiet  bool `kong:"short=q,help=Don\\'t print out prompt"`
+	Verify bool `kong:"negatable,default=true,help=Verify token before saving (default ${default})"`
 }
 
 func (c *authGitHubLoginCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
@@ -123,6 +120,18 @@ func (c *authGitHubLoginCmd) Run(ctx context.Context, k *kong.Kong, global *cli)
 	if len(token) == 0 {
 		return errors.New("no token entered")
 	}
+
+	if c.Verify {
+		httpClient := newGitHubHTTPClient(string(token))
+		defer httpClient.CloseIdleConnections()
+		client := githubv4.NewClient(httpClient)
+		username, err := gitHubAuthenticatedUser(ctx, client)
+		if err != nil {
+			return err
+		}
+		log.Infof(ctx, "Authenticated as %s\n", username)
+	}
+
 	path := filepath.Join(configHome, configSubdirName, "github-token")
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
@@ -130,10 +139,10 @@ func (c *authGitHubLoginCmd) Run(ctx context.Context, k *kong.Kong, global *cli)
 	if err := os.WriteFile(path, append(slices.Clip(token), '\n'), 0o600); err != nil {
 		return err
 	}
-
 	if !c.Quiet {
 		log.Infof(ctx, "Wrote GitHub token to %s", path)
 	}
+
 	return nil
 }
 
