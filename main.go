@@ -126,7 +126,8 @@ func readConfigFile(lookupEnv lookupEnvFunc, name string) ([]byte, error) {
 		if err == nil {
 			return data, nil
 		}
-		if firstError == nil || !errors.Is(err, os.ErrNotExist) {
+		if firstError == nil ||
+			(errors.Is(firstError, os.ErrNotExist) && !errors.Is(err, os.ErrNotExist)) {
 			firstError = err
 		}
 	}
