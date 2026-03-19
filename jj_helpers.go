@@ -196,12 +196,12 @@ func joinRevsets(revsets []string) string {
 	}
 
 	sb := new(strings.Builder)
-	sb.WriteString("(")
+	sb.WriteString("((")
 	sb.WriteString(revsets[0])
 	for _, r := range revsets[1:] {
 		sb.WriteString(")|(")
 		sb.WriteString(r)
 	}
-	sb.WriteString(")")
+	sb.WriteString("))")
 	return sb.String()
 }
