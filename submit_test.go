@@ -16,7 +16,7 @@ import (
 )
 
 func TestStackForBookmark(t *testing.T) {
-	ctx := t.Context()
+	ctx := testContext(t)
 	jjExe := findJJExecutable(t)
 
 	t.Run("SinglePR", func(t *testing.T) {
