@@ -23,7 +23,6 @@
 package main
 
 import (
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -46,13 +45,14 @@ func TestAuthGitHubLoginCmd(t *testing.T) {
 		lookPath: stubLookPath,
 	}
 
+	ctx := testContext(t)
 	stdout := new(strings.Builder)
 	stderr := new(strings.Builder)
 	k := &kong.Kong{
 		Stdout: stdout,
 		Stderr: stderr,
 	}
-	if err := c.Auth.GitHubLogin.Run(context.Background(), k, c); err != nil {
+	if err := c.Auth.GitHubLogin.Run(ctx, k, c); err != nil {
 		t.Error("Run:", err)
 	}
 
@@ -148,8 +148,9 @@ func TestGitHubToken(t *testing.T) {
 				t.Skip("Skip on Windows")
 			}
 
+			ctx := testContext(t)
 			lookPath := lookPathFunc(stubLookPath)
-			got, err := gitHubToken(context.Background(), test.env, lookPath)
+			got, err := gitHubToken(ctx, test.env, lookPath)
 			if test.err && err == nil {
 				t.Errorf("gitHubToken(...) = %q, <nil>; want _, <error>", got)
 			} else if !test.err && (got != test.want || err != nil) {
