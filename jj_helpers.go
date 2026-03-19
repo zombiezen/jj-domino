@@ -34,6 +34,7 @@ import (
 	jsonv2 "github.com/go-json-experiment/json"
 	"github.com/go-json-experiment/json/jsontext"
 	"zombiezen.com/go/jj-domino/internal/jujutsu"
+	"zombiezen.com/go/log"
 )
 
 // localCommitRef represents a local bookmark.
@@ -49,6 +50,7 @@ func singleCommitRevset(ctx context.Context, jj *jujutsu.Jujutsu, revset string)
 	multiple := false
 	err := jj.Log(ctx, revset, func(c *jujutsu.Commit) bool {
 		if result != nil {
+			log.Debugf(ctx, "Found %v and %v for %s", c, result, revset)
 			multiple = true
 			return false
 		}
@@ -71,6 +73,7 @@ func singleCommitRevset(ctx context.Context, jj *jujutsu.Jujutsu, revset string)
 func isNonEmptyRevset(ctx context.Context, jj *jujutsu.Jujutsu, revset string) (bool, error) {
 	nonEmpty := false
 	err := jj.Log(ctx, revset, func(c *jujutsu.Commit) bool {
+		log.Debugf(ctx, "Found %v is in %s", c.ID, revset)
 		nonEmpty = true
 		return false
 	})

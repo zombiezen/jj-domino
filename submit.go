@@ -85,6 +85,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 			pushRemoteName = "origin"
 		}
 	}
+	log.Debugf(ctx, "Remote: %s", pushRemoteName)
 	pushOutput := k.Stderr
 	if c.DryRun {
 		pushOutput = k.Stdout
@@ -113,6 +114,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 			return fmt.Errorf("trunk() (%v) does not have an associated remote", baseRef)
 		}
 	}
+	log.Debugf(ctx, "Base ref: %v", baseRef)
 
 	bookmarks, headBookmark, err := c.determineStackHead(ctx, jj, baseRef, pushRemoteName, pushOutput)
 	if err != nil {
@@ -123,6 +125,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 		// so exit now.
 		return nil
 	}
+	log.Debugf(ctx, "Bookmark: %v", headBookmark)
 
 	stack, err := stackForBookmark(ctx, jj, bookmarks, baseRef, headBookmark)
 	if err != nil {
@@ -133,6 +136,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 	if err != nil {
 		return err
 	}
+	log.Debugf(ctx, "Git repository at %s", gitRoot)
 	g, err := git.New(git.Options{Dir: gitRoot})
 	if err != nil {
 		return err
@@ -146,6 +150,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 	if baseRemote == nil {
 		return fmt.Errorf("unknown remote %s from base", baseRef.Remote)
 	}
+	log.Debugf(ctx, "remote.%s.url = %s", baseRef.Remote, baseRemote.FetchURL)
 	baseRepoPath, err := gitHubRepositoryForURL(baseRemote.FetchURL)
 	if err != nil {
 		return fmt.Errorf("base remote: %v", err)
@@ -154,6 +159,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 	if pushRemote == nil {
 		return fmt.Errorf("unknown remote %s from git.push", pushRemoteName)
 	}
+	log.Debugf(ctx, "remote.%s.pushurl = %s", pushRemoteName, pushRemote.PushURL)
 	headRepoPath, err := gitHubRepositoryForURL(pushRemote.PushURL)
 	if err != nil {
 		return fmt.Errorf("push remote: %v", err)
@@ -226,6 +232,12 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 	isNew := make([]bool, len(plan))
 	for i, pr := range plan {
 		isNew[i] = pr.ID == nil
+		if isNew[i] {
+			log.Debugf(ctx, "Will create new pull request for %s", pr.HeadRefName)
+		} else {
+			log.Debugf(ctx, "Will reuse pull request %v#%d for %s",
+				pr.baseRepositoryPath, pr.Number, pr.HeadRefName)
+		}
 	}
 	if c.DryRun {
 		// In a dry run, we should surface to the user that an editor might fail

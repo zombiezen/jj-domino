@@ -130,7 +130,7 @@ type lookPathFunc func(file string) (string, error)
 
 const configSubdirName = "jj-domino"
 
-func readConfigFile(lookupEnv lookupEnvFunc, name string) ([]byte, error) {
+func readConfigFile(ctx context.Context, lookupEnv lookupEnvFunc, name string) ([]byte, error) {
 	var configDirs iter.Seq[string]
 	if runtime.GOOS == "windows" {
 		configHome, err := windowsConfigHome(lookupEnv)
@@ -146,10 +146,13 @@ func readConfigFile(lookupEnv lookupEnvFunc, name string) ([]byte, error) {
 
 	var firstError error
 	for configDir := range configDirs {
-		data, err := os.ReadFile(filepath.Join(configDir, configSubdirName, name))
+		path := filepath.Join(configDir, configSubdirName, name)
+		data, err := os.ReadFile(path)
 		if err == nil {
+			log.Debugf(ctx, "Found config file at %s", path)
 			return data, nil
 		}
+		log.Debugf(ctx, "Searching config file: %v", err)
 		if firstError == nil ||
 			(errors.Is(firstError, os.ErrNotExist) && !errors.Is(err, os.ErrNotExist)) {
 			firstError = err
