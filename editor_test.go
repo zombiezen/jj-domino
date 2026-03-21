@@ -58,13 +58,11 @@ func TestEditPullRequestMessages(t *testing.T) {
 					},
 				},
 			},
-			wantInitialContent: editorPreamble +
-				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+			wantInitialContent: "" +
 				"Hello World\n\n" +
 				"This changes things.\n\n" +
 				editorPostscript,
-			editedContent: editorPreamble +
-				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+			editedContent: "" +
 				"Hello Universe\n\n" +
 				"This changes *EVERYTHING*.\n" +
 				editorPostscript,
@@ -89,13 +87,11 @@ func TestEditPullRequestMessages(t *testing.T) {
 					},
 				},
 			},
-			wantInitialContent: editorPreamble +
-				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+			wantInitialContent: "" +
 				"Hello World\n\n" +
 				"This changes things.\n\n" +
 				editorPostscript,
-			editedContent: editorPreamble +
-				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+			editedContent: "" +
 				"Hello Universe\n\n" +
 				"This changes *EVERYTHING*.\n" +
 				editorCommentPrefix + " Some choice commentary here.\n" +
@@ -122,13 +118,11 @@ func TestEditPullRequestMessages(t *testing.T) {
 					},
 				},
 			},
-			wantInitialContent: editorPreamble +
-				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+			wantInitialContent: "" +
 				"Hello World\n\n" +
 				"This changes things.\n\n" +
 				editorPostscript,
-			editedContent: editorPreamble +
-				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+			editedContent: "" +
 				"Hello Universe\n\n" +
 				"This changes *EVERYTHING*.\n" +
 				editorPostscript,
@@ -153,13 +147,11 @@ func TestEditPullRequestMessages(t *testing.T) {
 					},
 				},
 			},
-			wantInitialContent: editorPreamble +
-				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+			wantInitialContent: "" +
 				"Hello World\n\n" +
 				"This changes things.\n\n" +
 				editorPostscript,
-			editedContent: editorPreamble +
-				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+			editedContent: "" +
 				"\n \t \n\n" +
 				editorPostscript,
 			err: true,
@@ -175,13 +167,11 @@ func TestEditPullRequestMessages(t *testing.T) {
 					},
 				},
 			},
-			wantInitialContent: editorPreamble +
-				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+			wantInitialContent: "" +
 				"Hello World\n\n" +
 				"This changes things.\n\n" +
 				editorPostscript,
-			editedContent: editorPreamble +
-				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+			editedContent: "" +
 				"Hello Nothing\n\n" +
 				editorPostscript,
 			want: []*plannedPullRequest{
@@ -204,12 +194,10 @@ func TestEditPullRequestMessages(t *testing.T) {
 					},
 				},
 			},
-			wantInitialContent: editorPreamble +
-				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+			wantInitialContent: "" +
 				"Hello World\n\n" +
 				editorPostscript,
-			editedContent: editorPreamble +
-				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+			editedContent: "" +
 				"Hello new body\n\n" +
 				"wo\n" +
 				editorPostscript,
@@ -222,56 +210,6 @@ func TestEditPullRequestMessages(t *testing.T) {
 					},
 				},
 			},
-		},
-		{
-			name: "DuplicateMarkers",
-			pullRequests: []*plannedPullRequest{
-				{
-					pullRequest: pullRequest{
-						HeadRefName: "zombiezen/foo",
-						Title:       "Hello World",
-						Body:        "This changes things.",
-					},
-				},
-			},
-			wantInitialContent: editorPreamble +
-				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
-				"Hello World\n\n" +
-				"This changes things.\n\n" +
-				editorPostscript,
-			editedContent: editorPreamble +
-				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
-				"Hello Universe\n\n" +
-				"This changes *EVERYTHING*.\n" +
-				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
-				"Deja vu\n\n" +
-				editorPostscript,
-			err: true,
-		},
-		{
-			name: "ExtraMarker",
-			pullRequests: []*plannedPullRequest{
-				{
-					pullRequest: pullRequest{
-						HeadRefName: "zombiezen/foo",
-						Title:       "Hello World",
-						Body:        "This changes things.",
-					},
-				},
-			},
-			wantInitialContent: editorPreamble +
-				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
-				"Hello World\n\n" +
-				"This changes things.\n\n" +
-				editorPostscript,
-			editedContent: editorPreamble +
-				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
-				"Hello Universe\n\n" +
-				"This changes *EVERYTHING*.\n" +
-				editorSeparatorPrefix + "zombiezen/bar" + editorSeparatorSuffix +
-				"zombiezen, what is this?\n\n" +
-				editorPostscript,
-			err: true,
 		},
 		{
 			name: "MultiplePullRequests",
@@ -374,6 +312,82 @@ func TestEditPullRequestMessages(t *testing.T) {
 					},
 				},
 			},
+		},
+		{
+			name: "DuplicateMarkers",
+			pullRequests: []*plannedPullRequest{
+				{
+					pullRequest: pullRequest{
+						HeadRefName: "zombiezen/foo",
+						Title:       "Hello World",
+						Body:        "This changes things.",
+					},
+				},
+				{
+					pullRequest: pullRequest{
+						HeadRefName: "zombiezen/bar",
+						Title:       "Endgame",
+						Body:        "Checkmate!",
+					},
+				},
+			},
+			wantInitialContent: editorPreamble +
+				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+				"Hello World\n\n" +
+				"This changes things.\n\n" +
+				editorSeparatorPrefix + "zombiezen/bar" + editorSeparatorSuffix +
+				"Endgame\n\n" +
+				"Checkmate!\n\n" +
+				editorPostscript,
+			editedContent: editorPreamble +
+				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+				"Hello Universe\n\n" +
+				"This changes *EVERYTHING*.\n" +
+				editorSeparatorPrefix + "zombiezen/bar" + editorSeparatorSuffix +
+				"Close to Endgame\n\n" +
+				"Check\n\n" +
+				editorSeparatorPrefix + "zombiezen/bar" + editorSeparatorSuffix +
+				"Deja vu\n\n" +
+				editorPostscript,
+			err: true,
+		},
+		{
+			name: "ExtraMarker",
+			pullRequests: []*plannedPullRequest{
+				{
+					pullRequest: pullRequest{
+						HeadRefName: "zombiezen/foo",
+						Title:       "Hello World",
+						Body:        "This changes things.",
+					},
+				},
+				{
+					pullRequest: pullRequest{
+						HeadRefName: "zombiezen/bar",
+						Title:       "Endgame",
+						Body:        "Checkmate!",
+					},
+				},
+			},
+			wantInitialContent: editorPreamble +
+				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+				"Hello World\n\n" +
+				"This changes things.\n\n" +
+				editorSeparatorPrefix + "zombiezen/bar" + editorSeparatorSuffix +
+				"Endgame\n\n" +
+				"Checkmate!\n\n" +
+				editorPostscript,
+			editedContent: editorPreamble +
+				editorSeparatorPrefix + "zombiezen/foo" + editorSeparatorSuffix +
+				"Hello Universe\n\n" +
+				"This changes *EVERYTHING*.\n" +
+				editorSeparatorPrefix + "zombiezen/bar" + editorSeparatorSuffix +
+				"Close to Endgame\n\n" +
+				"Check\n\n" +
+				editorSeparatorPrefix + "zombiezen/baz" + editorSeparatorSuffix +
+				"zombiezen, what is this?\n\n" +
+				editorPostscript,
+			err: true,
 		},
 		{
 			name: "MissingMarker",
