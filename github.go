@@ -247,6 +247,7 @@ func updatePullRequest(ctx context.Context, client *githubv4.Client, baseRepoPat
 	log.Debugf(ctx, "Updating %v#%d body and base ref = %s...", baseRepoPath, pr.Number, pr.BaseRefName)
 	err := client.Mutate(ctx, &mutation, githubv4.UpdatePullRequestInput{
 		PullRequestID: pr.ID,
+		Title:         new(pr.Title),
 		Body:          new(pr.Body),
 		BaseRefName:   new(pr.BaseRefName),
 	}, nil)
