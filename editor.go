@@ -66,11 +66,16 @@ func editPullRequestMessages(prs []*plannedPullRequest, edit func(initialContent
 	if len(prs) == 0 {
 		return errors.New("no pull requests to edit")
 	}
-	initialContent := []byte(editorPreamble)
+	var initialContent []byte
+	if len(prs) > 1 {
+		initialContent = []byte(editorPreamble)
+	}
 	for _, pr := range prs {
-		initialContent = append(initialContent, editorSeparatorPrefix...)
-		initialContent = append(initialContent, pr.HeadRefName...)
-		initialContent = append(initialContent, editorSeparatorSuffix...)
+		if len(prs) > 1 {
+			initialContent = append(initialContent, editorSeparatorPrefix...)
+			initialContent = append(initialContent, pr.HeadRefName...)
+			initialContent = append(initialContent, editorSeparatorSuffix...)
+		}
 		initialContent = append(initialContent, pr.Title...)
 		if pr.Body != "" {
 			initialContent = append(initialContent, "\n\n"...)
@@ -88,7 +93,68 @@ func editPullRequestMessages(prs []*plannedPullRequest, edit func(initialContent
 		return nil
 	}
 
-	nextLine, stopLines := iter.Pull(bytes.SplitSeq(newContent, []byte("\n")))
+	if len(prs) == 1 {
+		return parseSinglePREditor(prs[0], newContent)
+	} else {
+		return parseMultiPREditor(prs, newContent)
+	}
+}
+
+func parseSinglePREditor(pr *plannedPullRequest, editorContent []byte) error {
+	nextLine, stopLines := iter.Pull(bytes.SplitSeq(editorContent, []byte("\n")))
+	defer stopLines()
+
+	// Read title.
+	for {
+		line, ok := nextLine()
+		if !ok {
+			return errors.New("missing title")
+		}
+		if bytes.HasPrefix(line, []byte(editorCommentPrefix)) {
+			continue
+		}
+		line = bytes.TrimSpace(line)
+		if len(line) > 0 {
+			pr.Title = githubv4.String(line)
+			break
+		}
+	}
+
+	// Read blank line.
+	for {
+		line, ok := nextLine()
+		if !ok {
+			pr.Body = ""
+			break
+		}
+		if !bytes.HasPrefix(line, []byte(editorCommentPrefix)) {
+			if len(bytes.TrimSpace(line)) > 0 {
+				return fmt.Errorf("missing blank line after %s", pr.Title)
+			}
+			break
+		}
+	}
+
+	// Read body.
+	body := new(strings.Builder)
+	for {
+		line, ok := nextLine()
+		if !ok {
+			break
+		}
+		if bytes.HasPrefix(line, []byte(editorCommentPrefix)) {
+			continue
+		}
+		body.Write(line)
+		body.WriteByte('\n')
+	}
+	pr.Body = githubv4.String(strings.Trim(body.String(), "\r\n"))
+
+	return nil
+}
+
+func parseMultiPREditor(prs []*plannedPullRequest, editorContent []byte) error {
+	nextLine, stopLines := iter.Pull(bytes.SplitSeq(editorContent, []byte("\n")))
 	defer stopLines()
 
 	// Read to first marker.
