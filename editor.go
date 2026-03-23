@@ -57,14 +57,8 @@ const (
 )
 
 func editPullRequestMessages(prs []*plannedPullRequest, edit func(initialContent []byte) ([]byte, error)) (err error) {
-	defer func() {
-		if err != nil {
-			err = fmt.Errorf("edit pull request messages: %v", err)
-		}
-	}()
-
 	if len(prs) == 0 {
-		return errors.New("no pull requests to edit")
+		return errors.New("edit pull request messages: no pull requests to edit")
 	}
 	var initialContent []byte
 	if len(prs) > 1 {
@@ -86,7 +80,7 @@ func editPullRequestMessages(prs []*plannedPullRequest, edit func(initialContent
 	initialContent = append(initialContent, editorPostscript...)
 	newContent, err := edit(initialContent)
 	if err != nil {
-		return err
+		return fmt.Errorf("edit pull request messages: %v", err)
 	}
 	if bytes.Equal(initialContent, newContent) {
 		// Optimization: File untouched. Use as-is.
@@ -94,13 +88,26 @@ func editPullRequestMessages(prs []*plannedPullRequest, edit func(initialContent
 	}
 
 	if len(prs) == 1 {
-		return parseSinglePREditor(prs[0], newContent)
+		err = parseSinglePREditor(prs[0], newContent)
 	} else {
-		return parseMultiPREditor(prs, newContent)
+		err = parseMultiPREditor(prs, newContent)
 	}
+	if err != nil {
+		return fmt.Errorf("edit pull request messages: %w", err)
+	}
+	return nil
 }
 
-func parseSinglePREditor(pr *plannedPullRequest, editorContent []byte) error {
+func parseSinglePREditor(pr *plannedPullRequest, editorContent []byte) (err error) {
+	defer func() {
+		if err != nil {
+			err = &editorParseError{
+				err:     err,
+				content: editorContent,
+			}
+		}
+	}()
+
 	nextLine, stopLines := iter.Pull(bytes.SplitSeq(editorContent, []byte("\n")))
 	defer stopLines()
 
@@ -153,7 +160,16 @@ func parseSinglePREditor(pr *plannedPullRequest, editorContent []byte) error {
 	return nil
 }
 
-func parseMultiPREditor(prs []*plannedPullRequest, editorContent []byte) error {
+func parseMultiPREditor(prs []*plannedPullRequest, editorContent []byte) (err error) {
+	defer func() {
+		if err != nil {
+			err = &editorParseError{
+				err:     err,
+				content: editorContent,
+			}
+		}
+	}()
+
 	nextLine, stopLines := iter.Pull(bytes.SplitSeq(editorContent, []byte("\n")))
 	defer stopLines()
 
@@ -272,6 +288,28 @@ func parseEditorSeparator(line []byte) (string, error) {
 		return "", fmt.Errorf("invalid separator line %q: missing ref name", origLine)
 	}
 	return ref, nil
+}
+
+type editorParseError struct {
+	err     error
+	content []byte
+}
+
+func (e *editorParseError) Error() string {
+	return e.err.Error()
+}
+
+func (e *editorParseError) Unwrap() error {
+	return e.err
+}
+
+// failedEditorContent returns the content from an error returned by [editPullRequestMessages].
+func failedEditorContent(err error) (content []byte, ok bool) {
+	e, ok := errors.AsType[*editorParseError](err)
+	if !ok {
+		return nil, false
+	}
+	return e.content, true
 }
 
 type editor struct {
