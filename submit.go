@@ -30,6 +30,7 @@ import (
 	"io"
 	"iter"
 	"maps"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -276,12 +277,20 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 					}
 				}
 			}
-			err := editPullRequestMessages(prsToEdit, func(initialContent []byte) ([]byte, error) {
+			editError := editPullRequestMessages(prsToEdit, func(initialContent []byte) ([]byte, error) {
 				log.Infof(ctx, "Opening editor for pull request descriptions...")
 				return e.open(ctx, "domino.jjdescription", initialContent)
 			})
-			if err != nil {
-				return err
+			if editError != nil {
+				if content, ok := failedEditorContent(editError); ok {
+					tempPath, err := writeTempFile("", "jj-domino-*.jjdescription", content)
+					if err != nil {
+						log.Warnf(ctx, "Tried to save editor content: %v", err)
+					} else {
+						editError = fmt.Errorf("%v (wrote content to %s)", editError, tempPath)
+					}
+				}
+				return editError
 			}
 		}
 	}
@@ -775,6 +784,20 @@ func prNumberPlaceholder(width int) string {
 		sb.WriteByte('X')
 	}
 	return sb.String()
+}
+
+func writeTempFile(dir string, pattern string, content []byte) (string, error) {
+	f, err := os.CreateTemp(dir, pattern)
+	if err != nil {
+		return "", err
+	}
+	_, err = f.Write(content)
+	err = errors.Join(err, f.Close())
+	path := f.Name()
+	if err != nil {
+		err = fmt.Errorf("write %s: %v", path, err)
+	}
+	return path, err
 }
 
 func maxIntWidth[T ~int | ~int8 | ~int16 | ~int32 | ~int64](nums iter.Seq[T]) int {
