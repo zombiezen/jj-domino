@@ -37,234 +37,172 @@ import (
 )
 
 func TestStackForBookmark(t *testing.T) {
-	ctx := testContext(t)
+	tests := []struct {
+		name            string
+		skip            string
+		changes         []changeDescription
+		deleteBookmarks []string
+		bookmark        string
+		want            func(commits map[string]*jujutsu.Commit) []stackedDiff
+		wantError       bool
+	}{
+		{
+			name: "SinglePR",
+			changes: []changeDescription{
+				{bookmark: "foo"},
+			},
+			bookmark: "foo",
+			want: func(commits map[string]*jujutsu.Commit) []stackedDiff {
+				return []stackedDiff{
+					{localCommitRef: localCommitRef{name: "foo", commit: commits["foo"]}},
+				}
+			},
+		},
+		{
+			name: "LinearChain",
+			changes: []changeDescription{
+				{bookmark: "foo"},
+				{bookmark: "bar"},
+			},
+			bookmark: "bar",
+			want: func(commits map[string]*jujutsu.Commit) []stackedDiff {
+				return []stackedDiff{
+					{localCommitRef: localCommitRef{name: "foo", commit: commits["foo"]}},
+					{localCommitRef: localCommitRef{name: "bar", commit: commits["bar"]}},
+				}
+			},
+		},
+		{
+			name: "LinearChainWithExtraCommits",
+			changes: []changeDescription{
+				{bookmark: "f"},
+				{bookmark: "e"},
+				{bookmark: "d"},
+				{bookmark: "c"},
+				{bookmark: "b"},
+				{bookmark: "a"},
+			},
+			deleteBookmarks: []string{"b", "c", "e", "f"},
+			bookmark:        "a",
+			want: func(commits map[string]*jujutsu.Commit) []stackedDiff {
+				return []stackedDiff{
+					{
+						localCommitRef: localCommitRef{
+							name:   "d",
+							commit: commits["d"],
+						},
+						uniqueAncestors: []*jujutsu.Commit{
+							commits["f"],
+							commits["e"],
+						},
+					},
+					{
+						localCommitRef: localCommitRef{
+							name:   "a",
+							commit: commits["a"],
+						},
+						uniqueAncestors: []*jujutsu.Commit{
+							commits["c"],
+							commits["b"],
+						},
+					},
+				}
+			},
+		},
+		{
+			name: "ValidMerge",
+			changes: []changeDescription{
+				{bookmark: "d"},
+				{bookmark: "b", parents: []string{"d"}},
+				{bookmark: "c", parents: []string{"d"}},
+				{bookmark: "a", parents: []string{"b", "c"}},
+			},
+			deleteBookmarks: []string{"b", "c", "d"},
+			bookmark:        "a",
+			want: func(commits map[string]*jujutsu.Commit) []stackedDiff {
+				return []stackedDiff{
+					{
+						localCommitRef: localCommitRef{
+							name:   "a",
+							commit: commits["a"],
+						},
+						uniqueAncestors: []*jujutsu.Commit{
+							commits["d"],
+							commits["c"],
+							commits["b"],
+						},
+					},
+				}
+			},
+		},
+		{
+			name: "InvalidMerge",
+			skip: "TODO(#1)",
+			changes: []changeDescription{
+				{bookmark: "d"},
+				{bookmark: "b", parents: []string{"d"}},
+				{bookmark: "c", parents: []string{"d"}},
+				{bookmark: "a", parents: []string{"b", "c"}},
+			},
+			deleteBookmarks: []string{"c", "d"},
+			bookmark:        "a",
+			wantError:       true,
+		},
+	}
+
 	jjExe := findJJExecutable(t)
-
-	t.Run("SinglePR", func(t *testing.T) {
-		repoDir := t.TempDir()
-		jj, err := jujutsu.New(jujutsu.Options{
-			Dir:   repoDir,
-			JJExe: jjExe,
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := createRepository(ctx, jj); err != nil {
-			t.Fatal(err)
-		}
-		commits, err := newChanges(ctx, jj, []changeDescription{
-			{bookmark: "foo"},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		bookmarks, err := jj.ListBookmarks(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		got, err := stackForBookmark(ctx, jj, bookmarks, jujutsu.RefSymbol{Name: "main"}, "foo")
-		if err != nil {
-			t.Fatal(err)
-		}
-		want := []stackedDiff{
-			{localCommitRef: localCommitRef{name: "foo", commit: commits["foo"]}},
-		}
-		if diff := cmp.Diff(want, got, stackedDiffOption()); diff != "" {
-			t.Errorf("stack (-want +got):\n%s", diff)
-		}
-	})
-
-	t.Run("LinearChain", func(t *testing.T) {
-		repoDir := t.TempDir()
-		jj, err := jujutsu.New(jujutsu.Options{
-			Dir:   repoDir,
-			JJExe: jjExe,
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := createRepository(ctx, jj); err != nil {
-			t.Fatal(err)
-		}
-		commits, err := newChanges(ctx, jj, []changeDescription{
-			{bookmark: "foo"},
-			{bookmark: "bar"},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		bookmarks, err := jj.ListBookmarks(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		got, err := stackForBookmark(ctx, jj, bookmarks, jujutsu.RefSymbol{Name: "main"}, "bar")
-		if err != nil {
-			t.Fatal(err)
-		}
-		want := []stackedDiff{
-			{localCommitRef: localCommitRef{name: "foo", commit: commits["foo"]}},
-			{localCommitRef: localCommitRef{name: "bar", commit: commits["bar"]}},
-		}
-		if diff := cmp.Diff(want, got, stackedDiffOption()); diff != "" {
-			t.Errorf("stack (-want +got):\n%s", diff)
-		}
-	})
-
-	t.Run("LinearChainWithExtraCommits", func(t *testing.T) {
-		repoDir := t.TempDir()
-		jj, err := jujutsu.New(jujutsu.Options{
-			Dir:   repoDir,
-			JJExe: jjExe,
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := createRepository(ctx, jj); err != nil {
-			t.Fatal(err)
-		}
-		commits, err := newChanges(ctx, jj, []changeDescription{
-			{bookmark: "f"},
-			{bookmark: "e"},
-			{bookmark: "d"},
-			{bookmark: "c"},
-			{bookmark: "b"},
-			{bookmark: "a"},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := jj.DeleteBookmarks(ctx, []string{"b", "c", "e", "f"}); err != nil {
-			t.Fatal(err)
-		}
-		bookmarks, err := jj.ListBookmarks(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		got, err := stackForBookmark(ctx, jj, bookmarks, jujutsu.RefSymbol{Name: "main"}, "a")
-		if err != nil {
-			t.Fatal(err)
-		}
-		want := []stackedDiff{
-			{
-				localCommitRef: localCommitRef{
-					name:   "d",
-					commit: commits["d"],
-				},
-				uniqueAncestors: []*jujutsu.Commit{
-					commits["f"],
-					commits["e"],
-				},
-			},
-			{
-				localCommitRef: localCommitRef{
-					name:   "a",
-					commit: commits["a"],
-				},
-				uniqueAncestors: []*jujutsu.Commit{
-					commits["c"],
-					commits["b"],
-				},
-			},
-		}
-		if diff := cmp.Diff(want, got, stackedDiffOption()); diff != "" {
-			t.Errorf("stack (-want +got):\n%s", diff)
-		}
-	})
-
-	t.Run("ValidMerge", func(t *testing.T) {
-		repoDir := t.TempDir()
-		jj, err := jujutsu.New(jujutsu.Options{
-			Dir:   repoDir,
-			JJExe: jjExe,
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := createRepository(ctx, jj); err != nil {
-			t.Fatal(err)
-		}
-		commits, err := newChanges(ctx, jj, []changeDescription{
-			{bookmark: "d"},
-			{bookmark: "b", parents: []string{"d"}},
-			{bookmark: "c", parents: []string{"d"}},
-			{bookmark: "a", parents: []string{"b", "c"}},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := jj.DeleteBookmarks(ctx, []string{"b", "c", "d"}); err != nil {
-			t.Fatal(err)
-		}
-		bookmarks, err := jj.ListBookmarks(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		got, err := stackForBookmark(ctx, jj, bookmarks, jujutsu.RefSymbol{Name: "main"}, "a")
-		if err != nil {
-			t.Fatal(err)
-		}
-		want := []stackedDiff{
-			{
-				localCommitRef: localCommitRef{
-					name:   "a",
-					commit: commits["a"],
-				},
-				uniqueAncestors: []*jujutsu.Commit{
-					commits["d"],
-					commits["c"],
-					commits["b"],
-				},
-			},
-		}
-		if diff := cmp.Diff(want, got, stackedDiffOption()); diff != "" {
-			t.Errorf("stack (-want +got):\n%s", diff)
-		}
-	})
-
-	t.Run("InvalidMerge", func(t *testing.T) {
-		t.Skip("TODO(#1)")
-
-		repoDir := t.TempDir()
-		jj, err := jujutsu.New(jujutsu.Options{
-			Dir:   repoDir,
-			JJExe: jjExe,
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := createRepository(ctx, jj); err != nil {
-			t.Fatal(err)
-		}
-		_, err = newChanges(ctx, jj, []changeDescription{
-			{bookmark: "d"},
-			{bookmark: "b", parents: []string{"d"}},
-			{bookmark: "c", parents: []string{"d"}},
-			{bookmark: "a", parents: []string{"b", "c"}},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := jj.DeleteBookmarks(ctx, []string{"c", "d"}); err != nil {
-			t.Fatal(err)
-		}
-		bookmarks, err := jj.ListBookmarks(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		got, err := stackForBookmark(ctx, jj, bookmarks, jujutsu.RefSymbol{Name: "main"}, "a")
-		if err == nil {
-			names := make([]string, 0, len(got))
-			for _, pr := range got {
-				names = append(names, pr.name)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if test.skip != "" {
+				t.Skip(test.skip)
 			}
-			t.Error("stackForBookmark did not return an error. Stack: main ←", strings.Join(names, " ← "))
-		}
-	})
+
+			ctx := testContext(t)
+
+			repoDir := t.TempDir()
+			jj, err := jujutsu.New(jujutsu.Options{
+				Dir:   repoDir,
+				JJExe: jjExe,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := createRepository(ctx, jj); err != nil {
+				t.Fatal(err)
+			}
+			commits, err := newChanges(ctx, jj, test.changes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := jj.DeleteBookmarks(ctx, test.deleteBookmarks); err != nil {
+				t.Fatal(err)
+			}
+			bookmarks, err := jj.ListBookmarks(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			got, err := stackForBookmark(ctx, jj, bookmarks, jujutsu.RefSymbol{Name: "main"}, test.bookmark)
+			switch {
+			case test.wantError && err == nil:
+				names := make([]string, 0, len(got))
+				for _, pr := range got {
+					names = append(names, pr.name)
+				}
+				t.Error("stackForBookmark did not return an error. Stack: main ←", strings.Join(names, " ← "))
+			case !test.wantError && err == nil:
+				want := test.want(commits)
+				if diff := cmp.Diff(want, got, stackedDiffOption()); diff != "" {
+					t.Errorf("stack (-want +got):\n%s", diff)
+				}
+			default:
+				t.Log(err)
+				if !test.wantError {
+					t.Fail()
+				}
+			}
+		})
+	}
 }
 
 func stackedDiffOption() cmp.Option {
