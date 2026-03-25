@@ -48,7 +48,8 @@ type localCommitRef struct {
 func singleCommitRevset(ctx context.Context, jj *jujutsu.Jujutsu, revset string) (*jujutsu.Commit, error) {
 	var result *jujutsu.Commit
 	multiple := false
-	err := jj.Log(ctx, revset, func(c *jujutsu.Commit) bool {
+	opts := jujutsu.LogOptions{Revset: revset}
+	err := jj.Log(ctx, opts, func(c *jujutsu.Commit) bool {
 		if result != nil {
 			log.Debugf(ctx, "Found %v and %v for %s", c, result, revset)
 			multiple = true
@@ -72,7 +73,8 @@ func singleCommitRevset(ctx context.Context, jj *jujutsu.Jujutsu, revset string)
 // isNonEmptyRevset reports whether the revset matches at least one commit.
 func isNonEmptyRevset(ctx context.Context, jj *jujutsu.Jujutsu, revset string) (bool, error) {
 	nonEmpty := false
-	err := jj.Log(ctx, revset, func(c *jujutsu.Commit) bool {
+	opts := jujutsu.LogOptions{Revset: revset}
+	err := jj.Log(ctx, opts, func(c *jujutsu.Commit) bool {
 		log.Debugf(ctx, "Found %v is in %s", c.ID, revset)
 		nonEmpty = true
 		return false

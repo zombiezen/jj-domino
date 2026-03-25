@@ -91,7 +91,8 @@ func stackForBookmark(ctx context.Context, jj *jujutsu.Jujutsu, bookmarks []*juj
 
 	revset := baseRef.String() + ".." + headCommitID.String()
 	changes := make(map[string]*jujutsu.Commit)
-	err := jj.Log(ctx, revset, func(c *jujutsu.Commit) bool {
+	logOptions := jujutsu.LogOptions{Revset: revset}
+	err := jj.Log(ctx, logOptions, func(c *jujutsu.Commit) bool {
 		changes[string(c.ID)] = c
 		return true
 	})

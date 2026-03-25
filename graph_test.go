@@ -239,7 +239,8 @@ func newChanges(ctx context.Context, jj *jujutsu.Jujutsu, changes []changeDescri
 		if err := jj.SetBookmark(ctx, []string{desc.bookmark}, jujutsu.SetBookmarkOptions{}); err != nil {
 			return m, err
 		}
-		err := jj.Log(ctx, "@", func(c *jujutsu.Commit) bool {
+		opts := jujutsu.LogOptions{Revset: "@"}
+		err := jj.Log(ctx, opts, func(c *jujutsu.Commit) bool {
 			m[desc.bookmark] = c
 			return false
 		})

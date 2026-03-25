@@ -286,8 +286,28 @@ func (sig *Signature) String() string {
 	return sb.String()
 }
 
-func (jj *Jujutsu) Log(ctx context.Context, revset string, yield func(*Commit) bool) error {
-	cmd := jj.command(ctx, "log", "--ignore-working-copy", "--no-graph", "--template", "json(self)", "--revisions", revset)
+// LogOptions is the set of optional parameters to [*Jujutsu.Log].
+type LogOptions struct {
+	// Revset is the set of revisions to yield.
+	// If empty, all() is used.
+	Revset string
+	// If Reversed is true, then the commits are yielded in order of older revisions first.
+	Reversed bool
+}
+
+// Log calls yield for every revision in opts.Revset.
+func (jj *Jujutsu) Log(ctx context.Context, opts LogOptions, yield func(*Commit) bool) error {
+	args := []string{
+		"log",
+		"--ignore-working-copy",
+		"--no-graph",
+		"--template=json(self)",
+		"--revisions=" + cmp.Or(opts.Revset, "all()"),
+	}
+	if opts.Reversed {
+		args = append(args, "--reversed")
+	}
+	cmd := jj.command(ctx, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("jj log: %v", err)
