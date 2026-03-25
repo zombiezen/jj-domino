@@ -367,7 +367,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 	for i, pr := range plan {
 		bodyBuilder := new(strings.Builder)
 		bodyBuilder.WriteString(strings.TrimRight(string(pr.Body), "\n"))
-		writeStackFooter(bodyBuilder, plan, i)
+		writeStackFooter(bodyBuilder, &stack[i], plan, i)
 		pr.Body = githubv4.String(bodyBuilder.String())
 
 		if err := updatePullRequest(ctx, gitHubClient, baseRepoPath, &pr.pullRequest); err != nil {
@@ -502,16 +502,7 @@ type plannedPullRequest struct {
 
 func planPullRequests(baseRepoPath gitHubRepositoryPath, baseRefName string, template string, headRepo *gitHubRepository, stack []stackedDiff) []*plannedPullRequest {
 	plan := make([]*plannedPullRequest, 0, len(stack))
-	isFork := headRepo.path() != baseRepoPath
 	for i, diff := range stack {
-		var prBase string
-		if i == 0 || isFork {
-			// A pull request's base ref must be in the pull request's repository.
-			// If we're pulling from a fork, then always use the base ref.
-			prBase = baseRefName
-		} else {
-			prBase = stack[i-1].name
-		}
 		title, body := inferPullRequestMessage(func(yield func(string) bool) {
 			for c := range diff.commitsBackward() {
 				if !yield(c.Description) {
@@ -525,7 +516,7 @@ func planPullRequests(baseRepoPath gitHubRepositoryPath, baseRefName string, tem
 		plan = append(plan, &plannedPullRequest{
 			baseRepositoryPath: baseRepoPath,
 			pullRequest: pullRequest{
-				BaseRefName:    githubv4.String(prBase),
+				BaseRefName:    githubv4.String(baseRefName),
 				HeadRepository: headRepo,
 				HeadRefName:    githubv4.String(diff.name),
 
@@ -586,20 +577,40 @@ const (
 	stackFooterMarker   = "<!-- jj-domino -->"
 	stackFooterPreamble = "" +
 		"\n\n" + stackFooterMarker + "\n" +
-		"<!-- Do not remove this comment! Everything in this section will be rewritten by jj-domino. -->\n\n" +
+		"<!-- Do not remove this comment! Everything in this section will be rewritten by jj-domino. -->" +
+		"\n\n"
+	stackFooterChangesSection = "" +
+		"## See the Changes\n\n" +
+		"This pull request is a draft because it is intended to be merged after %s. " +
+		"The new changes are in the [last %d commit%s](%s)." +
+		"\n\n"
+	stackFooterStackIntro = "" +
 		"## Related Pull Requests\n\n" +
 		"This pull request is part of a stack managed by [jj-domino](https://github.com/zombiezen/jj-domino):\n\n"
 )
 
 // writeStackFooter writes a Markdown blurb to sb
 // intended for the body of stack[i]
-// with links to the other pull requests in the stack.
-func writeStackFooter(sb *strings.Builder, stack []*plannedPullRequest, i int) {
+// with a link to display the unique delta
+// and links to the other pull requests in the stack.
+func writeStackFooter(sb *strings.Builder, diff *stackedDiff, stack []*plannedPullRequest, i int) {
 	if len(stack) <= 1 {
 		return
 	}
 
 	sb.WriteString(stackFooterPreamble)
+	if i > 0 {
+		plural := "s"
+		if diff.len() == 1 {
+			plural = ""
+		}
+		fmt.Fprintf(sb, stackFooterChangesSection,
+			fmt.Sprintf("#%d", stack[i-1].Number),
+			diff.len(), plural,
+			stack[i].changesURL(diff.root().ID, diff.commit.ID),
+		)
+	}
+	sb.WriteString(stackFooterStackIntro)
 	for j, pr := range stack {
 		if j == i {
 			fmt.Fprintf(sb, "% 2d. *→ this pull request ←*\n", j+1)
@@ -720,6 +731,19 @@ func stackForBookmark(ctx context.Context, jj *jujutsu.Jujutsu, bookmarks []*juj
 		resultError = fmt.Errorf("compute stack for %q: %w", bookmark, resultError)
 	}
 	return stack, resultError
+}
+
+// root returns the commit in the diff that is not a descendant of other commits in the diff.
+func (diff *stackedDiff) root() *jujutsu.Commit {
+	if len(diff.uniqueAncestors) > 0 {
+		return diff.uniqueAncestors[0]
+	}
+	return diff.commit
+}
+
+// len returns the number of commits in the diff.
+func (diff *stackedDiff) len() int {
+	return len(diff.uniqueAncestors) + 1
 }
 
 // commitsBackward returns an iterator over all the commits in the diff.
