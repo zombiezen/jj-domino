@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os/exec"
 	"reflect"
 	"strings"
@@ -305,17 +306,35 @@ func findJJExecutable(tb testing.TB) string {
 }
 
 func TestWriteStackFooter(t *testing.T) {
+	repository := &gitHubRepository{
+		Owner: &gitHubRepositoryOwner{Login: "zombiezen"},
+		Name:  "jj-domino",
+	}
+
 	tests := []struct {
 		name  string
-		stack []*plannedPullRequest
+		stack []stackedDiff
+		plan  []*plannedPullRequest
 		want  []string
 	}{
 		{
 			name: "Single",
-			stack: []*plannedPullRequest{
+			stack: []stackedDiff{
 				{
+					localCommitRef: localCommitRef{
+						name:   "foo",
+						commit: &jujutsu.Commit{ID: jujutsu.CommitID{0x01, 0x23}},
+					},
+				},
+			},
+			plan: []*plannedPullRequest{
+				{
+					baseRepositoryPath: repository.path(),
 					pullRequest: pullRequest{
-						Number: 123,
+						Number:         123,
+						BaseRefName:    "main",
+						HeadRefName:    "foo",
+						HeadRepository: repository,
 					},
 				},
 			},
@@ -325,23 +344,119 @@ func TestWriteStackFooter(t *testing.T) {
 		},
 		{
 			name: "TwoStack",
-			stack: []*plannedPullRequest{
+			stack: []stackedDiff{
 				{
-					pullRequest: pullRequest{
-						Number: 123,
+					localCommitRef: localCommitRef{
+						name:   "foo",
+						commit: &jujutsu.Commit{ID: jujutsu.CommitID{0x01, 0x23}},
 					},
 				},
 				{
+					localCommitRef: localCommitRef{
+						name:   "bar",
+						commit: &jujutsu.Commit{ID: jujutsu.CommitID{0x45, 0x67}},
+					},
+				},
+			},
+			plan: []*plannedPullRequest{
+				{
+					baseRepositoryPath: repository.path(),
 					pullRequest: pullRequest{
-						Number: 456,
+						Number:         123,
+						BaseRefName:    "main",
+						HeadRefName:    "foo",
+						HeadRepository: repository,
+						URL: githubv4.URI{URL: &url.URL{
+							Scheme: "https",
+							Host:   "github.com",
+							Path:   "/" + repository.path().String() + "/pull/123",
+						}},
+					},
+				},
+				{
+					baseRepositoryPath: repository.path(),
+					pullRequest: pullRequest{
+						Number:         456,
+						BaseRefName:    "main",
+						HeadRefName:    "bar",
+						HeadRepository: repository,
+						URL: githubv4.URI{URL: &url.URL{
+							Scheme: "https",
+							Host:   "github.com",
+							Path:   "/" + repository.path().String() + "/pull/456",
+						}},
 					},
 				},
 			},
 			want: []string{
 				stackFooterPreamble +
+					stackFooterStackIntro +
 					" 1. *→ this pull request ←*\n" +
 					" 2. #456\n",
 				stackFooterPreamble +
+					fmt.Sprintf(stackFooterChangesSection, "#123", 1, "", "https://github.com/"+repository.path().String()+"/pull/456/changes/4567") +
+					stackFooterStackIntro +
+					" 1. #123\n" +
+					" 2. *→ this pull request ←*\n",
+			},
+		},
+		{
+			name: "TwoStackWithMultipleCommits",
+			stack: []stackedDiff{
+				{
+					localCommitRef: localCommitRef{
+						name:   "foo",
+						commit: &jujutsu.Commit{ID: jujutsu.CommitID{0x01, 0x23}},
+					},
+				},
+				{
+					localCommitRef: localCommitRef{
+						name:   "bar",
+						commit: &jujutsu.Commit{ID: jujutsu.CommitID{0x89, 0xab}},
+					},
+					uniqueAncestors: []*jujutsu.Commit{
+						{ID: jujutsu.CommitID{0x45, 0x67}},
+					},
+				},
+			},
+			plan: []*plannedPullRequest{
+				{
+					baseRepositoryPath: repository.path(),
+					pullRequest: pullRequest{
+						Number:         123,
+						BaseRefName:    "main",
+						HeadRefName:    "foo",
+						HeadRepository: repository,
+						URL: githubv4.URI{URL: &url.URL{
+							Scheme: "https",
+							Host:   "github.com",
+							Path:   "/" + repository.path().String() + "/pull/123",
+						}},
+					},
+				},
+				{
+					baseRepositoryPath: repository.path(),
+					pullRequest: pullRequest{
+						Number:         456,
+						BaseRefName:    "main",
+						HeadRefName:    "bar",
+						HeadRepository: repository,
+						URL: githubv4.URI{URL: &url.URL{
+							Scheme: "https",
+							Host:   "github.com",
+							Path:   "/" + repository.path().String() + "/pull/456",
+						}},
+					},
+				},
+			},
+			want: []string{
+				stackFooterPreamble +
+					stackFooterStackIntro +
+					" 1. *→ this pull request ←*\n" +
+					" 2. #456\n",
+				stackFooterPreamble +
+					fmt.Sprintf(stackFooterChangesSection, "#123", 2, "s", "https://github.com/"+repository.path().String()+"/pull/456/changes/4567..89ab") +
+					stackFooterStackIntro +
 					" 1. #123\n" +
 					" 2. *→ this pull request ←*\n",
 			},
@@ -352,7 +467,7 @@ func TestWriteStackFooter(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			for i, want := range test.want {
 				sb := new(strings.Builder)
-				writeStackFooter(sb, test.stack, i)
+				writeStackFooter(sb, new(test.stack[i]), test.plan, i)
 				got := sb.String()
 				if diff := cmp.Diff(want, got); diff != "" {
 					t.Errorf("footer for stack[%d] (-want +got):\n%s", i, diff)

@@ -90,6 +90,18 @@ type pullRequest struct {
 	HeadRefName    githubv4.String
 }
 
+// changesURL constructs a URL to the "Files Changed" tab.
+func (pr *pullRequest) changesURL(from, to jujutsu.CommitID) githubv4.URI {
+	switch {
+	case from.IsZero() || to.IsZero():
+		return githubv4.URI{URL: pr.URL.JoinPath("changes")}
+	case from.Equal(to):
+		return githubv4.URI{URL: pr.URL.JoinPath("changes", from.String())}
+	default:
+		return githubv4.URI{URL: pr.URL.JoinPath("changes", from.String()+".."+to.String())}
+	}
+}
+
 type gitHubRepository struct {
 	ID    githubv4.ID
 	Name  githubv4.String
