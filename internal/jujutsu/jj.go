@@ -33,7 +33,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	jsonv2 "github.com/go-json-experiment/json"
 	"github.com/go-json-experiment/json/jsontext"
@@ -251,9 +253,37 @@ func (jj *Jujutsu) ListBookmarks(ctx context.Context) ([]*Bookmark, error) {
 // https://docs.jj-vcs.dev/latest/glossary/#commit
 type Commit struct {
 	ID          CommitID   `json:"commit_id"`
-	ChangeID    ChangeID   `json:"change_id"`
-	Description string     `json:"description"`
 	Parents     []CommitID `json:"parents"`
+	ChangeID    ChangeID   `json:"change_id"`
+	Author      Signature  `json:"author"`
+	Committer   Signature  `json:"committer"`
+	Description string     `json:"description"`
+}
+
+// Signature represents a person/entity
+// and a timestamp for when they authored or committed a [Commit].
+//
+// https://docs.jj-vcs.dev/latest/templates/#signature-type
+type Signature struct {
+	Name      string    `json:"name"`
+	Email     string    `json:"email"`
+	Timestamp time.Time `json:"timestamp,format:RFC3339"`
+}
+
+// String formats the signature in Git commit format.
+func (sig *Signature) String() string {
+	sb := new(strings.Builder)
+	sb.WriteString(sig.Name)
+	if sig.Email != "" {
+		sb.WriteString(" <")
+		sb.WriteString(sig.Email)
+		sb.WriteString(">")
+	}
+	sb.WriteString(" ")
+	sb.WriteString(strconv.FormatInt(sig.Timestamp.Unix(), 10))
+	sb.WriteString(" ")
+	sb.WriteString(sig.Timestamp.Format("-0700"))
+	return sb.String()
 }
 
 func (jj *Jujutsu) Log(ctx context.Context, revset string, yield func(*Commit) bool) error {
