@@ -113,6 +113,9 @@ func newStack(commits *commitgraph.Graph, allBookmarks []*jujutsu.Bookmark, book
 		},
 	}}
 	visited := make(map[string]struct{})
+	var preferredBookmarkNames iter.Seq[string] = func(yield func(string) bool) {
+		yield(bookmark.Name)
+	}
 	var resultError error
 	for curr := headCommit.Parents; len(curr) > 0; {
 		var next []jujutsu.CommitID
@@ -127,7 +130,7 @@ func newStack(commits *commitgraph.Graph, allBookmarks []*jujutsu.Bookmark, book
 				// Base ref or base ref ancestor.
 				continue
 			}
-			if name, err := nameForCommit(allBookmarks, id); isNoBookmarksError(err) {
+			if b, err := bookmarkForCommit(allBookmarks, id, preferredBookmarkNames); isNoBookmarksError(err) {
 				top := &stack[len(stack)-1]
 				top.uniqueAncestors = append(top.uniqueAncestors, c)
 			} else if err != nil {
@@ -135,7 +138,7 @@ func newStack(commits *commitgraph.Graph, allBookmarks []*jujutsu.Bookmark, book
 			} else {
 				stack = append(stack, stackedDiff{
 					localCommitRef: localCommitRef{
-						name:   name,
+						name:   b.Name,
 						commit: c,
 					},
 				})

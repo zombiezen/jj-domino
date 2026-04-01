@@ -382,7 +382,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 	return nil
 }
 
-func (c *submitCmd) determineStackHead(ctx context.Context, jj *jujutsu.Jujutsu, baseRef jujutsu.RefSymbol, pushRemoteName string, pushOutput io.Writer) (bookmarks []*jujutsu.Bookmark, headBookmark string, err error) {
+func (c *submitCmd) determineStackHead(ctx context.Context, jj *jujutsu.Jujutsu, baseRef jujutsu.RefSymbol, pushRemoteName string, pushOutput io.Writer) (bookmarks []*jujutsu.Bookmark, headBookmarkName string, err error) {
 	if c.Bookmark != "" {
 		var err error
 		bookmarks, err = jj.ListBookmarks(ctx)
@@ -413,11 +413,11 @@ func (c *submitCmd) determineStackHead(ctx context.Context, jj *jujutsu.Jujutsu,
 	if err != nil {
 		return nil, "", err
 	}
-	headBookmark, err = nameForCommit(bookmarks, head.ID)
+	headBookmark, err := bookmarkForCommit(bookmarks, head.ID, func(yield func(string) bool) {})
 	if err != nil {
 		return bookmarks, "", fmt.Errorf("find stack head: %v", err)
 	}
-	return bookmarks, headBookmark, nil
+	return bookmarks, headBookmark.Name, nil
 }
 
 // shouldCreatePushBookmarks reports whether the options indicate whether "jj git push -c" will be run.
