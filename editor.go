@@ -56,7 +56,7 @@ const (
 		editorCommentPrefix + " Lines starting with `" + editorCommentPrefix + "` (like this one) will be removed.\n"
 )
 
-func editPullRequestMessages(prs []*plannedPullRequest, edit func(initialContent []byte) ([]byte, error)) (err error) {
+func editPullRequestMessages(prs []*pullRequest, edit func(initialContent []byte) ([]byte, error)) (err error) {
 	if len(prs) == 0 {
 		return errors.New("edit pull request messages: no pull requests to edit")
 	}
@@ -64,16 +64,16 @@ func editPullRequestMessages(prs []*plannedPullRequest, edit func(initialContent
 	if len(prs) > 1 {
 		initialContent = []byte(editorPreamble)
 	}
-	for _, pr := range prs {
+	for _, diff := range prs {
 		if len(prs) > 1 {
 			initialContent = append(initialContent, editorSeparatorPrefix...)
-			initialContent = append(initialContent, pr.HeadRefName...)
+			initialContent = append(initialContent, diff.HeadRefName...)
 			initialContent = append(initialContent, editorSeparatorSuffix...)
 		}
-		initialContent = append(initialContent, pr.Title...)
-		if pr.Body != "" {
+		initialContent = append(initialContent, diff.Title...)
+		if diff.Body != "" {
 			initialContent = append(initialContent, "\n\n"...)
-			initialContent = append(initialContent, strings.TrimRight(string(pr.Body), "\n")...)
+			initialContent = append(initialContent, strings.TrimRight(string(diff.Body), "\n")...)
 		}
 		initialContent = append(initialContent, "\n\n"...)
 	}
@@ -98,7 +98,7 @@ func editPullRequestMessages(prs []*plannedPullRequest, edit func(initialContent
 	return nil
 }
 
-func parseSinglePREditor(pr *plannedPullRequest, editorContent []byte) (err error) {
+func parseSinglePREditor(pr *pullRequest, editorContent []byte) (err error) {
 	defer func() {
 		if err != nil {
 			err = &editorParseError{
@@ -160,7 +160,7 @@ func parseSinglePREditor(pr *plannedPullRequest, editorContent []byte) (err erro
 	return nil
 }
 
-func parseMultiPREditor(prs []*plannedPullRequest, editorContent []byte) (err error) {
+func parseMultiPREditor(prs []*pullRequest, editorContent []byte) (err error) {
 	defer func() {
 		if err != nil {
 			err = &editorParseError{
@@ -198,8 +198,8 @@ func parseMultiPREditor(prs []*plannedPullRequest, editorContent []byte) (err er
 	// Read pull request content.
 	found := make([]bool, len(prs))
 	for headRefName != "" {
-		i := slices.IndexFunc(prs, func(pr *plannedPullRequest) bool {
-			return pr.HeadRefName == githubv4.String(headRefName)
+		i := slices.IndexFunc(prs, func(pr *pullRequest) bool {
+			return string(pr.HeadRefName) == headRefName
 		})
 		if i == -1 {
 			return fmt.Errorf("unknown bookmark name %s", headRefName)
