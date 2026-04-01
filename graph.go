@@ -29,6 +29,7 @@ import (
 	"iter"
 	"slices"
 
+	"zombiezen.com/go/jj-domino/internal/commitgraph"
 	"zombiezen.com/go/jj-domino/internal/jujutsu"
 )
 
@@ -72,11 +73,6 @@ func (diff *stackedDiff) commitsBackward() iter.Seq[*jujutsu.Commit] {
 }
 
 func stackForBookmark(ctx context.Context, jj *jujutsu.Jujutsu, bookmarks []*jujutsu.Bookmark, baseRef jujutsu.RefSymbol, bookmark string) ([]stackedDiff, error) {
-	type stackFrame struct {
-		curr  *jujutsu.Commit
-		trail []localCommitRef
-	}
-
 	i := slices.IndexFunc(bookmarks, func(b *jujutsu.Bookmark) bool {
 		return b.Name == bookmark && b.Remote == ""
 	})
@@ -88,25 +84,31 @@ func stackForBookmark(ctx context.Context, jj *jujutsu.Jujutsu, bookmarks []*juj
 	if !ok {
 		return nil, fmt.Errorf("compute stack for %q: unresolved bookmark", bookmark)
 	}
-
-	revset := baseRef.String() + ".." + headCommitID.String()
-	changes := make(map[string]*jujutsu.Commit)
-	logOptions := jujutsu.LogOptions{Revset: revset}
-	err := jj.Log(ctx, logOptions, func(c *jujutsu.Commit) bool {
-		changes[string(c.ID)] = c
-		return true
-	})
+	commits, err := commitgraph.FromRevset(ctx, jj, baseRef.String()+".."+headCommitID.String())
 	if err != nil {
 		return nil, fmt.Errorf("compute stack for %q: %v", bookmark, err)
 	}
-	headCommit := changes[string(headCommitID)]
-	if headCommit == nil {
-		return nil, fmt.Errorf("compute stack for %q: commit %v is ancestor of %v", bookmark, headCommitID, baseRef)
+	return newStack(commits, bookmarks, b)
+}
+
+func newStack(commits *commitgraph.Graph, allBookmarks []*jujutsu.Bookmark, bookmark *jujutsu.Bookmark) ([]stackedDiff, error) {
+	type stackFrame struct {
+		curr  *jujutsu.Commit
+		trail []localCommitRef
+	}
+
+	headCommitID, ok := bookmark.TargetMerge.Resolved()
+	if !ok {
+		return nil, fmt.Errorf("compute stack for %q: unresolved bookmark", bookmark.Name)
+	}
+	headCommit, ok := commits.Get(headCommitID)
+	if !ok {
+		return nil, fmt.Errorf("compute stack for %q: commit %v is ancestor of base", bookmark.Name, headCommitID)
 	}
 
 	stack := []stackedDiff{{
 		localCommitRef: localCommitRef{
-			name:   bookmark,
+			name:   bookmark.Name,
 			commit: headCommit,
 		},
 	}}
@@ -120,12 +122,12 @@ func stackForBookmark(ctx context.Context, jj *jujutsu.Jujutsu, bookmarks []*juj
 			}
 			visited[string(id)] = struct{}{}
 
-			c := changes[string(id)]
-			if c == nil {
+			c, ok := commits.Get(id)
+			if !ok {
 				// Base ref or base ref ancestor.
 				continue
 			}
-			if name, err := nameForCommit(bookmarks, id); isNoBookmarksError(err) {
+			if name, err := nameForCommit(allBookmarks, id); isNoBookmarksError(err) {
 				top := &stack[len(stack)-1]
 				top.uniqueAncestors = append(top.uniqueAncestors, c)
 			} else if err != nil {
@@ -148,7 +150,7 @@ func stackForBookmark(ctx context.Context, jj *jujutsu.Jujutsu, bookmarks []*juj
 		slices.Reverse(stack[i].uniqueAncestors)
 	}
 	if resultError != nil {
-		resultError = fmt.Errorf("compute stack for %q: %w", bookmark, resultError)
+		resultError = fmt.Errorf("compute stack for %q: %w", bookmark.Name, resultError)
 	}
 	return stack, resultError
 }

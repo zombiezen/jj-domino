@@ -251,6 +251,10 @@ func newChanges(ctx context.Context, jj *jujutsu.Jujutsu, changes []changeDescri
 	return m, nil
 }
 
+func trunkPlaceholderCommitID() jujutsu.CommitID {
+	return jujutsu.CommitID{0xde, 0xad, 0xbe, 0xef, 0xca, 0xfe}
+}
+
 var jjExePath = sync.OnceValues(func() (string, error) {
 	return exec.LookPath("jj")
 })
