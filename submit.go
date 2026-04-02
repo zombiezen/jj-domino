@@ -582,7 +582,7 @@ const (
 	stackFooterChangesSection = "" +
 		"## View Changes\n\n" +
 		"This pull request is a draft because it is intended to be merged after %s. " +
-		"The new changes are in the [last %d commit%s](%s)." +
+		"The new changes are in the [last %s](%s)." +
 		"\n\n"
 	stackFooterStackIntro = "" +
 		"## Related Pull Requests\n\n" +
@@ -600,13 +600,15 @@ func writeStackFooter(sb *strings.Builder, diff *stackedDiff, stack []*plannedPu
 
 	sb.WriteString(stackFooterPreamble)
 	if i > 0 {
-		plural := "s"
-		if diff.len() == 1 {
-			plural = ""
+		var commitsPhrase string
+		if n := diff.len(); n == 1 {
+			commitsPhrase = "commit"
+		} else {
+			commitsPhrase = fmt.Sprintf("%d commits", n)
 		}
 		fmt.Fprintf(sb, stackFooterChangesSection,
 			fmt.Sprintf("#%d", stack[i-1].Number),
-			diff.len(), plural,
+			commitsPhrase,
 			stack[i].changesURL(diff.root().ID, diff.commit.ID),
 		)
 	}
