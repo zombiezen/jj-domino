@@ -394,7 +394,7 @@ func TestWriteStackFooter(t *testing.T) {
 					" 1. *→ this pull request ←*\n" +
 					" 2. #456\n",
 				stackFooterPreamble +
-					fmt.Sprintf(stackFooterChangesSection, "#123", 1, "", "https://github.com/"+repository.path().String()+"/pull/456/changes/4567") +
+					fmt.Sprintf(stackFooterChangesSection, "#123", "commit", "https://github.com/"+repository.path().String()+"/pull/456/changes/4567") +
 					stackFooterStackIntro +
 					" 1. #123\n" +
 					" 2. *→ this pull request ←*\n",
@@ -455,7 +455,7 @@ func TestWriteStackFooter(t *testing.T) {
 					" 1. *→ this pull request ←*\n" +
 					" 2. #456\n",
 				stackFooterPreamble +
-					fmt.Sprintf(stackFooterChangesSection, "#123", 2, "s", "https://github.com/"+repository.path().String()+"/pull/456/changes/4567..89ab") +
+					fmt.Sprintf(stackFooterChangesSection, "#123", "2 commits", "https://github.com/"+repository.path().String()+"/pull/456/changes/4567..89ab") +
 					stackFooterStackIntro +
 					" 1. #123\n" +
 					" 2. *→ this pull request ←*\n",
