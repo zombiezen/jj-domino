@@ -44,7 +44,7 @@ import (
 )
 
 type submitCmd struct {
-	Bookmark  string   `kong:"short=b,help=Push a stack with the bookmark as the head,placeholder=NAME,xor=revisions"`
+	Bookmarks []string `kong:"name=bookmark,short=b,help=Push a stack with the bookmark as the head,placeholder=NAME,xor=revisions"`
 	Revisions []string `kong:"short=r,sep=none,help=Push stacks pointing to these commits (can be repeated) (default: trunk()..@),placeholder=REVSETS,xor=revisions"`
 	Changes   []string `kong:"name=change,short=c,sep=none,help=Push stacks by creating bookmarks (can be repeated),placeholder=REVSETS,xor=revisions"`
 	Editor    *bool    `kong:"negatable,help=Whether to open an editor on the pull request descriptions (defaults to only new PRs)"`
@@ -117,18 +117,18 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 	}
 	log.Debugf(ctx, "Base ref: %v", baseRef)
 
-	bookmarks, headBookmark, err := c.determineStackHead(ctx, jj, baseRef, pushRemoteName, pushOutput)
+	bookmarks, selectedBookmarkNames, err := c.determineBookmarkNames(ctx, jj, baseRef, pushRemoteName, pushOutput)
 	if err != nil {
 		return err
 	}
-	if headBookmark == "" {
+	if len(selectedBookmarkNames) == 0 {
 		// We don't have a head bookmark (jj-domino submit --change REVSET --dry-run),
 		// so exit now.
 		return nil
 	}
-	log.Debugf(ctx, "Bookmark: %v", headBookmark)
+	log.Debugf(ctx, "Bookmark: %v", selectedBookmarkNames)
 
-	stack, err := stackForBookmark(ctx, jj, bookmarks, baseRef, headBookmark)
+	graph, err := graphFromRepository(ctx, jj, bookmarks, baseRef, selectedBookmarkNames)
 	if err != nil {
 		return err
 	}
@@ -165,7 +165,14 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 	if err != nil {
 		return fmt.Errorf("push remote: %v", err)
 	}
-	pullRequestTemplate := readGitHubPullRequestTemplate(ctx, jj, stack[len(stack)-1].commit.ID.String())
+	templateRevision := "latest(" + joinRevsets(func(yield func(string) bool) {
+		for head := range graph.heads() {
+			if !yield(head.commit.ID.String()) {
+				return
+			}
+		}
+	}) + ")"
+	pullRequestTemplate := readGitHubPullRequestTemplate(ctx, jj, templateRevision)
 
 	token, err := gitHubToken(ctx, global.environ, global.lookPath)
 	if err != nil {
@@ -176,11 +183,14 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 		// We can still display the proposed PRs.
 		log.Warnf(ctx, "Unable to authenticate to GitHub: %v", err)
 
-		plan := planPullRequests(baseRepoPath, baseRef.Name, pullRequestTemplate, placeholderGitHubRepository(headRepoPath), stack)
-		plan[0].IsDraft = githubv4.Boolean(c.Draft)
 		sb := new(strings.Builder)
-		for _, pr := range plan {
-			writeLogLine(sb, &pr.pullRequest, logLineOptions{
+		headRepo := placeholderGitHubRepository(headRepoPath)
+		for diff := range graph.walk() {
+			pr := pullRequestFromStackedDiff(githubv4.String(baseRef.Name), headRepo, diff)
+			if slices.Contains(graph.roots, diff) {
+				pr.IsDraft = githubv4.Boolean(c.Draft)
+			}
+			writeLogLine(sb, pr, logLineOptions{
 				baseRepositoryPath: baseRepoPath,
 				prNumberWidth:      defaultPRNumberWidth,
 			})
@@ -208,24 +218,27 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 		}
 	}
 
-	plan := planPullRequests(baseRepoPath, baseRef.Name, pullRequestTemplate, headRepo, stack)
-	plan[0].IsDraft = githubv4.Boolean(c.Draft)
-
 	var baseRepo *gitHubRepository
-	for _, pr := range plan {
-		newBaseRepo, existingPR, err := findOpenPullRequestForHead(ctx, gitHubClient, baseRepoPath, headRepoPath, string(pr.HeadRefName))
+	newDiffs := make(map[*stackedDiff]struct{})
+	for diff := range graph.walk() {
+		newBaseRepo, existingPR, err := findOpenPullRequestForHead(ctx, gitHubClient, baseRepoPath, headRepoPath, diff.name)
 		baseRepo = cmp.Or(newBaseRepo, baseRepo)
 		if err != nil && !errors.Is(err, errPullRequestNotFound) {
 			planError = errors.Join(planError, err)
 			continue
 		}
-		if existingPR != nil {
-			pr.ID = existingPR.ID
-			pr.Number = existingPR.Number
-			pr.Title = existingPR.Title
-			pr.HeadRepository = existingPR.HeadRepository
-			pr.Body = githubv4.String(trimStackFooter(string(existingPR.Body)))
-			pr.URL = existingPR.URL
+		if existingPR == nil {
+			newDiffs[diff] = struct{}{}
+			diff.pullRequest = pullRequestFromStackedDiff(githubv4.String(baseRef.Name), headRepo, diff)
+			if pullRequestTemplate != "" {
+				diff.pullRequest.Body += githubv4.String("\n\n" + pullRequestTemplate)
+			}
+			log.Debugf(ctx, "Will create new pull request for %s", diff.name)
+		} else {
+			existingPR.Body = githubv4.String(trimStackFooter(string(existingPR.Body)))
+			diff.pullRequest = existingPR
+			log.Debugf(ctx, "Will reuse pull request %v#%d for %s",
+				baseRepo.path(), existingPR.Number, diff.name)
 		}
 	}
 	if planError != nil {
@@ -233,23 +246,13 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 	}
 
 	// Edit pull request titles/bodies.
-	isNew := make([]bool, len(plan))
-	for i, pr := range plan {
-		isNew[i] = pr.ID == nil
-		if isNew[i] {
-			log.Debugf(ctx, "Will create new pull request for %s", pr.HeadRefName)
-		} else {
-			log.Debugf(ctx, "Will reuse pull request %v#%d for %s",
-				pr.baseRepositoryPath, pr.Number, pr.HeadRefName)
-		}
-	}
 	if c.DryRun {
 		// In a dry run, we should surface to the user that an editor might fail
 		// and have unexpected consequences.
 		if _, err := jujutsuEditor(jjSettings); err != nil {
 			log.Warnf(ctx, "Unable to determine editor: %v", err)
 		}
-	} else if c.Editor != nil && *c.Editor || c.Editor == nil && slices.Contains(isNew, true) {
+	} else if c.Editor != nil && *c.Editor || c.Editor == nil && len(newDiffs) > 0 {
 		if editorCommand, err := jujutsuEditor(jjSettings); err != nil {
 			if c.Editor != nil {
 				// User explicitly requested editor. Abort.
@@ -269,12 +272,12 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 					log.Errorf(ctx, "%v", err)
 				},
 			}
-			prsToEdit := make([]*pullRequest, 0, len(plan))
-			for i, pr := range plan {
+			var prsToEdit []*pullRequest
+			for diff := range graph.walk() {
 				// If the user didn't explicitly request an editor,
 				// only surface the new PRs.
-				if isNew[i] || c.Editor != nil {
-					prsToEdit = append(prsToEdit, &pr.pullRequest)
+				if _, isNew := newDiffs[diff]; isNew || c.Editor != nil {
+					prsToEdit = append(prsToEdit, diff.pullRequest)
 				}
 			}
 			editError := editPullRequestMessages(prsToEdit, func(initialContent []byte) ([]byte, error) {
@@ -298,8 +301,8 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 	// If we haven't already run push, then do so (in dry-run mode if requested).
 	if c.Push && !c.shouldCreatePushBookmarks() {
 		err := jjGitPush(ctx, jj, pushOutput, c.DryRun, pushRemoteName, func(yield func(string) bool) {
-			for _, pr := range plan {
-				if !yield("--bookmark=exact:" + jujutsu.Quote(string(pr.HeadRefName))) {
+			for diff := range graph.walk() {
+				if !yield("--bookmark=exact:" + jujutsu.Quote(string(diff.name))) {
 					return
 				}
 			}
@@ -314,9 +317,9 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 		baseRepositoryPath: baseRepoPath,
 		link:               useANSIEscapes(k.Stdout, lookupEnvMapFunc(global.environ)),
 		prNumberWidth: cmp.Or(maxIntWidth(func(yield func(githubv4.Int) bool) {
-			for _, pr := range plan {
-				if pr.ID != nil {
-					if !yield(pr.Number) {
+			for diff := range graph.walk() {
+				if _, isNew := newDiffs[diff]; !isNew {
+					if !yield(diff.pullRequest.Number) {
 						return
 					}
 				}
@@ -325,9 +328,9 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 	}
 	if c.DryRun {
 		sb := new(strings.Builder)
-		for _, pr := range plan {
-			writeLogLine(sb, &pr.pullRequest, logOptions)
-			if pr.ID == nil {
+		for diff := range graph.walk() {
+			writeLogLine(sb, diff.pullRequest, logOptions)
+			if _, isNew := newDiffs[diff]; isNew {
 				sb.WriteString(" (new)")
 			}
 			sb.WriteString("\n")
@@ -338,42 +341,42 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 
 	// Create all the new pull requests first so we have the numbers.
 	// We need the pull request numbers/URLs for the stack footer.
-	for i, pr := range plan {
-		if !isNew[i] {
+	for diff := range graph.walk() {
+		if _, isNew := newDiffs[diff]; !isNew {
 			continue
 		}
 
-		if err := createPullRequest(ctx, gitHubClient, baseRepo, &pr.pullRequest); err != nil {
+		if err := createPullRequest(ctx, gitHubClient, baseRepo, diff.pullRequest); err != nil {
 			return err
 		}
 		logOptions.prNumberWidth = max(logOptions.prNumberWidth, maxIntWidth(func(yield func(githubv4.Int) bool) {
-			yield(pr.pullRequest.Number)
+			yield(diff.pullRequest.Number)
 		}))
 		sb := new(strings.Builder)
-		writeLogLine(sb, &pr.pullRequest, logOptions)
+		writeLogLine(sb, diff.pullRequest, logOptions)
 		sb.WriteString(" (new)\n")
 		io.WriteString(k.Stdout, sb.String())
 	}
 
 	// Now go through and update all the pull requests in the stack with the footer
 	// (and base ref names).
-	for i, pr := range plan {
+	for diff := range graph.walk() {
 		bodyBuilder := new(strings.Builder)
-		bodyBuilder.WriteString(strings.TrimRight(string(pr.Body), "\n"))
-		writeStackFooter(bodyBuilder, &stack[i], plan, i)
-		pr.Body = githubv4.String(bodyBuilder.String())
+		bodyBuilder.WriteString(strings.TrimRight(string(diff.pullRequest.Body), "\n"))
+		writeStackFooter(bodyBuilder, diff)
+		diff.pullRequest.Body = githubv4.String(bodyBuilder.String())
 
-		if err := updatePullRequest(ctx, gitHubClient, baseRepoPath, &pr.pullRequest); err != nil {
+		if err := updatePullRequest(ctx, gitHubClient, baseRepoPath, diff.pullRequest); err != nil {
 			return err
 		}
-		if !isNew[i] {
-			if err := updatePullRequestDraftStatus(ctx, gitHubClient, baseRepoPath, &pr.pullRequest); err != nil {
+		if _, isNew := newDiffs[diff]; !isNew {
+			if err := updatePullRequestDraftStatus(ctx, gitHubClient, baseRepoPath, diff.pullRequest); err != nil {
 				// Not a fatal error: the pull request still exists.
 				log.Warnf(ctx, "%v", err)
 			}
 
 			sb := new(strings.Builder)
-			writeLogLine(sb, &pr.pullRequest, logOptions)
+			writeLogLine(sb, diff.pullRequest, logOptions)
 			sb.WriteString("\n")
 			io.WriteString(k.Stdout, sb.String())
 		}
@@ -382,144 +385,106 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 	return nil
 }
 
-func (c *submitCmd) determineStackHead(ctx context.Context, jj *jujutsu.Jujutsu, baseRef jujutsu.RefSymbol, pushRemoteName string, pushOutput io.Writer) (bookmarks []*jujutsu.Bookmark, headBookmarkName string, err error) {
-	if c.Bookmark != "" {
+func (c *submitCmd) determineBookmarkNames(ctx context.Context, jj *jujutsu.Jujutsu, baseRef jujutsu.RefSymbol, pushRemoteName string, pushOutput io.Writer) (allBookmarks []*jujutsu.Bookmark, selectedBookmarkNames []string, err error) {
+	if len(c.Bookmarks) > 0 {
 		var err error
-		bookmarks, err = jj.ListBookmarks(ctx)
-		return bookmarks, c.Bookmark, err
+		allBookmarks, err = jj.ListBookmarks(ctx)
+		return allBookmarks, c.Bookmarks, err
 	}
 
-	var head *jujutsu.Commit
+	var revset string
 	if c.shouldCreatePushBookmarks() {
-		var err error
-		head, err = c.pushChanges(ctx, jj, baseRef, pushRemoteName, pushOutput)
-		if err != nil {
-			return nil, "", err
+		if err := c.pushChanges(ctx, jj, baseRef, pushRemoteName, pushOutput); err != nil {
+			return nil, nil, err
 		}
 		if c.DryRun {
 			// Bookmarks haven't been created, so we can't get the name.
-			return nil, "", nil
+			return nil, nil, nil
 		}
-	} else {
-		var err error
-		head, err = c.findStackHeadFromRevisions(ctx, jj, baseRef)
-		if err != nil {
-			return nil, "", err
-		}
-	}
-
-	// List bookmarks after potentially pushing changes.
-	bookmarks, err = jj.ListBookmarks(ctx)
-	if err != nil {
-		return nil, "", err
-	}
-	headBookmark, err := bookmarkForCommit(bookmarks, head.ID, func(yield func(string) bool) {})
-	if err != nil {
-		return bookmarks, "", fmt.Errorf("find stack head: %v", err)
-	}
-	return bookmarks, headBookmark.Name, nil
-}
-
-// shouldCreatePushBookmarks reports whether the options indicate whether "jj git push -c" will be run.
-func (c *submitCmd) shouldCreatePushBookmarks() bool {
-	return c.Bookmark == "" && len(c.Changes) > 0
-}
-
-// pushChanges runs "jj git push -c c.Changes"
-// and returns the head commit from the revset defined by c.Changes.
-func (c *submitCmd) pushChanges(ctx context.Context, jj *jujutsu.Jujutsu, baseRef jujutsu.RefSymbol, pushRemoteName string, pushOutput io.Writer) (*jujutsu.Commit, error) {
-	revset := joinRevsets(slices.Values(c.Changes))
-	if hasBase, err := isNonEmptyRevset(ctx, jj, revset+" & ::"+baseRef.String()); err != nil {
-		return nil, fmt.Errorf("check for overlaps with %v: %v", baseRef, err)
-	} else if hasBase {
-		return nil, fmt.Errorf("changes overlap with %v", baseRef)
-	}
-	// Validate once without doing a network call.
-	headRevset := "heads(" + revset + ")"
-	head, err := singleCommitRevset(ctx, jj, headRevset)
-	if err != nil {
-		if errors.Is(err, errEmptyRevset) {
-			err = errors.New("no changes found")
-		}
-		return nil, fmt.Errorf("find stack head: %v", err)
-	}
-
-	err = jjGitPush(ctx, jj, pushOutput, c.DryRun, pushRemoteName, func(yield func(string) bool) {
-		yield("--change=" + revset)
-	})
-	if err != nil {
-		return nil, err
-	}
-	if c.DryRun {
-		return head, nil
-	}
-
-	// Add blank line to separate pull request output.
-	io.WriteString(pushOutput, "\n")
-
-	// We need to repeat this after the push in case the commit ID changed.
-	head, err = singleCommitRevset(ctx, jj, headRevset)
-	if err != nil {
-		if errors.Is(err, errEmptyRevset) {
-			err = errors.New("no changes found")
-		}
-		return nil, fmt.Errorf("find stack head: %v", err)
-	}
-
-	return head, nil
-}
-
-// findStackHeadFromRevisions returns the head commit from c.Revisions.
-func (c *submitCmd) findStackHeadFromRevisions(ctx context.Context, jj *jujutsu.Jujutsu, baseRef jujutsu.RefSymbol) (*jujutsu.Commit, error) {
-	var revset string
-	if len(c.Revisions) > 0 {
+		revset = joinRevsets(slices.Values(c.Changes))
+	} else if len(c.Revisions) > 0 {
 		revset = joinRevsets(slices.Values(c.Revisions))
 	} else {
 		revset = "(" + baseRef.String() + "..@)"
 	}
-	var err error
-	head, err := singleCommitRevset(ctx, jj, "heads(bookmarks() & "+revset+")")
+
+	// List bookmarks *after* potentially pushing changes.
+	allBookmarks, err = jj.ListBookmarks(ctx)
 	if err != nil {
-		if errors.Is(err, errEmptyRevset) {
-			err = errors.New("no bookmarks found")
-		}
-		return nil, fmt.Errorf("find stack head: %v", err)
+		return allBookmarks, nil, err
 	}
-	return head, nil
-}
 
-type plannedPullRequest struct {
-	pullRequest
-	baseRepositoryPath gitHubRepositoryPath
-}
-
-func planPullRequests(baseRepoPath gitHubRepositoryPath, baseRefName string, template string, headRepo *gitHubRepository, stack []stackedDiff) []*plannedPullRequest {
-	plan := make([]*plannedPullRequest, 0, len(stack))
-	for i, diff := range stack {
-		title, body := inferPullRequestMessage(func(yield func(string) bool) {
-			for c := range diff.commitsBackward() {
-				if !yield(c.Description) {
-					return
-				}
+	logOptions := jujutsu.LogOptions{
+		Revset: revset,
+	}
+	var resultError error
+	err = jj.Log(ctx, logOptions, func(c *jujutsu.Commit) bool {
+		b, err := bookmarkForCommit(allBookmarks, c.ID, nil)
+		if err != nil {
+			if isNoBookmarksError(err) {
+				return true
+			} else {
+				resultError = errors.Join(resultError, err)
+				return false
 			}
-		})
-		if template != "" {
-			body += "\n\n" + template
 		}
-		plan = append(plan, &plannedPullRequest{
-			baseRepositoryPath: baseRepoPath,
-			pullRequest: pullRequest{
-				BaseRefName:    githubv4.String(baseRefName),
-				HeadRepository: headRepo,
-				HeadRefName:    githubv4.String(diff.name),
-
-				Title:   githubv4.String(title),
-				Body:    githubv4.String(body),
-				IsDraft: githubv4.Boolean(i > 0),
-			},
-		})
+		selectedBookmarkNames = append(selectedBookmarkNames, b.Name)
+		return true
+	})
+	resultError = errors.Join(resultError, err)
+	if resultError == nil && len(selectedBookmarkNames) == 0 {
+		resultError = fmt.Errorf("bookmarks() & (%s) did not match any changes", joinRevsets(slices.Values(selectedBookmarkNames)))
 	}
-	return plan
+
+	return allBookmarks, selectedBookmarkNames, resultError
+}
+
+// shouldCreatePushBookmarks reports whether the options indicate whether "jj git push -c" will be run.
+func (c *submitCmd) shouldCreatePushBookmarks() bool {
+	return len(c.Bookmarks) == 0 && len(c.Changes) > 0
+}
+
+// pushChanges runs "jj git push -c c.Changes"
+// and returns the commits from the revset defined by c.Changes.
+func (c *submitCmd) pushChanges(ctx context.Context, jj *jujutsu.Jujutsu, baseRef jujutsu.RefSymbol, pushRemoteName string, pushOutput io.Writer) error {
+	revset := joinRevsets(slices.Values(c.Changes))
+	if hasBase, err := isNonEmptyRevset(ctx, jj, revset+" & ::"+baseRef.String()); err != nil {
+		return fmt.Errorf("check for overlaps with %v: %v", baseRef, err)
+	} else if hasBase {
+		return fmt.Errorf("changes overlap with %v", baseRef)
+	}
+
+	err := jjGitPush(ctx, jj, pushOutput, c.DryRun, pushRemoteName, func(yield func(string) bool) {
+		yield("--change=" + revset)
+	})
+	if err != nil {
+		return err
+	}
+
+	if !c.DryRun {
+		// Add blank line to separate pull request output.
+		io.WriteString(pushOutput, "\n")
+	}
+	return nil
+}
+
+func pullRequestFromStackedDiff(baseRefName githubv4.String, headRepository *gitHubRepository, diff *stackedDiff) *pullRequest {
+	title, body := inferPullRequestMessage(func(yield func(string) bool) {
+		for c := range diff.commitsBackward() {
+			if !yield(c.Description) {
+				return
+			}
+		}
+	})
+	return &pullRequest{
+		BaseRefName:    baseRefName,
+		HeadRepository: headRepository,
+		HeadRefName:    githubv4.String(diff.name),
+
+		Title:   githubv4.String(title),
+		Body:    githubv4.String(body),
+		IsDraft: len(diff.parents) > 0,
+	}
 }
 
 type logLineOptions struct {
@@ -583,41 +548,162 @@ const (
 		"This pull request is a draft because it is intended to be merged after %s. " +
 		"The new changes are in the [last %s](%s)." +
 		"\n\n"
-	stackFooterStackIntro = "" +
+	stackFooterRelatedSectionIntro = "" +
 		"## Related Pull Requests\n\n" +
 		"This pull request is part of a stack managed by [jj-domino](https://github.com/zombiezen/jj-domino):\n\n"
+	stackFooterParentsIntro  = "This pull request comes after:\n\n"
+	stackFooterChildrenIntro = "After this pull request:\n\n"
 )
 
 // writeStackFooter writes a Markdown blurb to sb
-// intended for the body of stack[i]
+// intended for the body of diff
 // with a link to display the unique delta
 // and links to the other pull requests in the stack.
-func writeStackFooter(sb *strings.Builder, diff *stackedDiff, stack []*plannedPullRequest, i int) {
-	if len(stack) <= 1 {
+func writeStackFooter(sb *strings.Builder, diff *stackedDiff) {
+	if len(diff.children) == 0 && len(diff.parents) == 0 {
 		return
 	}
 
 	sb.WriteString(stackFooterPreamble)
-	if i > 0 {
-		var commitsPhrase string
-		if n := diff.len(); n == 1 {
-			commitsPhrase = "commit"
-		} else {
-			commitsPhrase = fmt.Sprintf("%d commits", n)
+	writeStackFooterChanges(sb, diff)
+	sb.WriteString(stackFooterRelatedSectionIntro)
+
+	if len(diff.parents) > 1 {
+		writeStackFooterList(sb, stackFooterParentsIntro, func(yield func(*pullRequest) bool) {
+			for _, parent := range diff.parents {
+				if !yield(parent.pullRequest) {
+					return
+				}
+			}
+		})
+		if len(diff.children) > 0 {
+			sb.WriteString("\n")
 		}
-		fmt.Fprintf(sb, stackFooterChangesSection,
-			fmt.Sprintf("#%d", stack[i-1].Number),
-			commitsPhrase,
-			stack[i].changesURL(diff.root().ID, diff.commit.ID),
-		)
+		writeStackFooterChildren(sb, diff)
+		return
 	}
-	sb.WriteString(stackFooterStackIntro)
-	for j, pr := range stack {
-		if j == i {
-			fmt.Fprintf(sb, "% 2d. *→ this pull request ←*\n", j+1)
-		} else {
-			fmt.Fprintf(sb, "% 2d. #%d\n", j+1, pr.Number)
+
+	var list []*stackedDiff
+	ancestorsDiverge := false
+	if len(diff.parents) == 1 {
+		for curr := diff.parents[0]; ; {
+			list = append(list, curr)
+			if len(curr.parents) != 1 {
+				ancestorsDiverge = len(curr.parents) > 1
+				break
+			}
+			curr = curr.parents[0]
 		}
+		slices.Reverse(list)
+	}
+	list = append(list, diff)
+
+	descendantsDiverge := len(diff.children) > 1
+	if len(diff.children) == 1 {
+		for curr := diff.children[0]; ; {
+			list = append(list, curr)
+			if len(curr.children) != 1 {
+				descendantsDiverge = len(curr.children) > 1
+				break
+			}
+			curr = curr.children[0]
+		}
+	}
+
+	if len(list) > 1 {
+		if ancestorsDiverge {
+			sb.WriteString("- …multiple pull requests…\n")
+		}
+		for i, other := range list {
+			if ancestorsDiverge {
+				sb.WriteString("- ")
+			} else {
+				fmt.Fprintf(sb, "% 2d. ", i+1)
+			}
+			if other == diff {
+				sb.WriteString("*→ this pull request ←*\n")
+			} else {
+				fmt.Fprintf(sb, "#%d\n", other.pullRequest.Number)
+			}
+		}
+	}
+	if descendantsDiverge {
+		if list[len(list)-1] == diff {
+			if len(list) > 1 {
+				sb.WriteString("\n")
+			}
+			writeStackFooterChildren(sb, diff)
+		} else {
+			if ancestorsDiverge {
+				sb.WriteString("-")
+			} else {
+				fmt.Fprintf(sb, "% 2d.", len(list)+1)
+			}
+			sb.WriteString(" …multiple pull requests…\n")
+		}
+	}
+}
+
+// writeStackFooterChanges writes the "View Changes" section to sb.
+func writeStackFooterChanges(sb *strings.Builder, diff *stackedDiff) {
+	var parentsString string
+	switch len(diff.parents) {
+	case 0:
+		return
+	case 1:
+		parentsString = fmt.Sprintf("#%d", diff.parents[0].pullRequest.Number)
+	case 2:
+		parentsString = fmt.Sprintf("#%d and #%d", diff.parents[0].pullRequest.Number, diff.parents[1].pullRequest.Number)
+	default:
+		sb := new(strings.Builder)
+		for i, parent := range diff.parents {
+			if i == len(diff.parents)-1 {
+				sb.WriteString(", and ")
+			} else if i > 0 {
+				sb.WriteString(", ")
+			}
+			fmt.Fprintf(sb, "#%d", parent.pullRequest.Number)
+		}
+	}
+	var commitsPhrase string
+	if n := diff.len(); n == 1 {
+		commitsPhrase = "commit"
+	} else {
+		commitsPhrase = fmt.Sprintf("%d commits", n)
+	}
+	fmt.Fprintf(sb, stackFooterChangesSection,
+		parentsString,
+		commitsPhrase,
+		diff.pullRequest.changesURL(diff.root().ID, diff.commit.ID),
+	)
+}
+
+// writeStackFooterChildren writes the list of immediate child pull requests of diff to sb.
+func writeStackFooterChildren(sb *strings.Builder, diff *stackedDiff) {
+	writeStackFooterList(sb, stackFooterChildrenIntro, func(yield func(*pullRequest) bool) {
+		for _, child := range diff.children {
+			if !yield(child.pullRequest) {
+				return
+			}
+		}
+	})
+}
+
+// writeStackFooterList writes a unordered list of links to pull requests
+// with an introduction to sb.
+// If prs is empty, then nothing is written.
+func writeStackFooterList(sb *strings.Builder, intro string, prs iter.Seq[*pullRequest]) {
+	nextPR, stop := iter.Pull(prs)
+	defer stop()
+
+	pr, ok := nextPR()
+	if !ok {
+		return
+	}
+	sb.WriteString(intro)
+	for ok {
+		fmt.Fprintf(sb, "- #%d\n", pr.Number)
+		pr, ok = nextPR()
 	}
 }
 

@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -19,164 +21,506 @@ func TestWriteStackFooter(t *testing.T) {
 
 	tests := []struct {
 		name  string
-		stack []stackedDiff
-		plan  []*plannedPullRequest
-		want  []string
+		graph diffGraph
+		prs   map[string]*pullRequest
+		want  map[string]string
 	}{
 		{
 			name: "Single",
-			stack: []stackedDiff{
-				{
-					localCommitRef: localCommitRef{
-						name:   "foo",
-						commit: &jujutsu.Commit{ID: jujutsu.CommitID{0x01, 0x23}},
+			graph: mustDiffGraph(t,
+				[]*jujutsu.Commit{
+					{
+						ID:      jujutsu.CommitID{0x01, 0x23},
+						Parents: []jujutsu.CommitID{trunkPlaceholderCommitID()},
 					},
 				},
-			},
-			plan: []*plannedPullRequest{
-				{
-					baseRepositoryPath: repository.path(),
-					pullRequest: pullRequest{
-						Number:         123,
-						BaseRefName:    "main",
-						HeadRefName:    "foo",
-						HeadRepository: repository,
+				[]*jujutsu.Bookmark{
+					{
+						Name:        "foo",
+						TargetMerge: jujutsu.Resolved(jujutsu.CommitID{0x01, 0x23}),
 					},
 				},
+				[]string{"foo"},
+			),
+			prs: map[string]*pullRequest{
+				"foo": {
+					Number:         123,
+					BaseRefName:    "main",
+					HeadRefName:    "foo",
+					HeadRepository: repository,
+				},
 			},
-			want: []string{
-				"",
+			want: map[string]string{
+				"foo": "",
 			},
 		},
 		{
 			name: "TwoStack",
-			stack: []stackedDiff{
-				{
-					localCommitRef: localCommitRef{
-						name:   "foo",
-						commit: &jujutsu.Commit{ID: jujutsu.CommitID{0x01, 0x23}},
+			graph: mustDiffGraph(t,
+				[]*jujutsu.Commit{
+					{
+						ID:      jujutsu.CommitID{0x45, 0x67},
+						Parents: []jujutsu.CommitID{{0x01, 0x23}},
+					},
+					{
+						ID:      jujutsu.CommitID{0x01, 0x23},
+						Parents: []jujutsu.CommitID{trunkPlaceholderCommitID()},
 					},
 				},
-				{
-					localCommitRef: localCommitRef{
-						name:   "bar",
-						commit: &jujutsu.Commit{ID: jujutsu.CommitID{0x45, 0x67}},
+				[]*jujutsu.Bookmark{
+					{
+						Name:        "foo",
+						TargetMerge: jujutsu.Resolved(jujutsu.CommitID{0x01, 0x23}),
 					},
+					{
+						Name:        "bar",
+						TargetMerge: jujutsu.Resolved(jujutsu.CommitID{0x45, 0x67}),
+					},
+				},
+				[]string{"bar"},
+			),
+			prs: map[string]*pullRequest{
+				"foo": {
+					Number:         123,
+					BaseRefName:    "main",
+					HeadRefName:    "foo",
+					HeadRepository: repository,
+					URL: githubv4.URI{URL: &url.URL{
+						Scheme: "https",
+						Host:   "github.com",
+						Path:   "/" + repository.path().String() + "/pull/123",
+					}},
+				},
+				"bar": {
+					Number:         456,
+					BaseRefName:    "main",
+					HeadRefName:    "bar",
+					HeadRepository: repository,
+					URL: githubv4.URI{URL: &url.URL{
+						Scheme: "https",
+						Host:   "github.com",
+						Path:   "/" + repository.path().String() + "/pull/456",
+					}},
 				},
 			},
-			plan: []*plannedPullRequest{
-				{
-					baseRepositoryPath: repository.path(),
-					pullRequest: pullRequest{
-						Number:         123,
-						BaseRefName:    "main",
-						HeadRefName:    "foo",
-						HeadRepository: repository,
-						URL: githubv4.URI{URL: &url.URL{
-							Scheme: "https",
-							Host:   "github.com",
-							Path:   "/" + repository.path().String() + "/pull/123",
-						}},
-					},
-				},
-				{
-					baseRepositoryPath: repository.path(),
-					pullRequest: pullRequest{
-						Number:         456,
-						BaseRefName:    "main",
-						HeadRefName:    "bar",
-						HeadRepository: repository,
-						URL: githubv4.URI{URL: &url.URL{
-							Scheme: "https",
-							Host:   "github.com",
-							Path:   "/" + repository.path().String() + "/pull/456",
-						}},
-					},
-				},
-			},
-			want: []string{
-				stackFooterPreamble +
-					stackFooterStackIntro +
+			want: map[string]string{
+				"foo": stackFooterPreamble +
+					stackFooterRelatedSectionIntro +
 					" 1. *→ this pull request ←*\n" +
 					" 2. #456\n",
-				stackFooterPreamble +
+				"bar": stackFooterPreamble +
 					fmt.Sprintf(stackFooterChangesSection, "#123", "commit", "https://github.com/"+repository.path().String()+"/pull/456/changes/4567") +
-					stackFooterStackIntro +
+					stackFooterRelatedSectionIntro +
 					" 1. #123\n" +
 					" 2. *→ this pull request ←*\n",
 			},
 		},
 		{
 			name: "TwoStackWithMultipleCommits",
-			stack: []stackedDiff{
-				{
-					localCommitRef: localCommitRef{
-						name:   "foo",
-						commit: &jujutsu.Commit{ID: jujutsu.CommitID{0x01, 0x23}},
+			graph: mustDiffGraph(t,
+				[]*jujutsu.Commit{
+					{
+						ID:      jujutsu.CommitID{0x89, 0xab},
+						Parents: []jujutsu.CommitID{{0x45, 0x67}},
+					},
+					{
+						ID:      jujutsu.CommitID{0x45, 0x67},
+						Parents: []jujutsu.CommitID{{0x01, 0x23}},
+					},
+					{
+						ID:      jujutsu.CommitID{0x01, 0x23},
+						Parents: []jujutsu.CommitID{trunkPlaceholderCommitID()},
 					},
 				},
-				{
-					localCommitRef: localCommitRef{
-						name:   "bar",
-						commit: &jujutsu.Commit{ID: jujutsu.CommitID{0x89, 0xab}},
+				[]*jujutsu.Bookmark{
+					{
+						Name:        "foo",
+						TargetMerge: jujutsu.Resolved(jujutsu.CommitID{0x01, 0x23}),
 					},
-					uniqueAncestors: []*jujutsu.Commit{
-						{ID: jujutsu.CommitID{0x45, 0x67}},
+					{
+						Name:        "bar",
+						TargetMerge: jujutsu.Resolved(jujutsu.CommitID{0x89, 0xab}),
 					},
+				},
+				[]string{"bar"},
+			),
+			prs: map[string]*pullRequest{
+				"foo": {
+					Number:         123,
+					BaseRefName:    "main",
+					HeadRefName:    "foo",
+					HeadRepository: repository,
+					URL: githubv4.URI{URL: &url.URL{
+						Scheme: "https",
+						Host:   "github.com",
+						Path:   "/" + repository.path().String() + "/pull/123",
+					}},
+				},
+				"bar": {
+					Number:         456,
+					BaseRefName:    "main",
+					HeadRefName:    "bar",
+					HeadRepository: repository,
+					URL: githubv4.URI{URL: &url.URL{
+						Scheme: "https",
+						Host:   "github.com",
+						Path:   "/" + repository.path().String() + "/pull/456",
+					}},
 				},
 			},
-			plan: []*plannedPullRequest{
-				{
-					baseRepositoryPath: repository.path(),
-					pullRequest: pullRequest{
-						Number:         123,
-						BaseRefName:    "main",
-						HeadRefName:    "foo",
-						HeadRepository: repository,
-						URL: githubv4.URI{URL: &url.URL{
-							Scheme: "https",
-							Host:   "github.com",
-							Path:   "/" + repository.path().String() + "/pull/123",
-						}},
-					},
-				},
-				{
-					baseRepositoryPath: repository.path(),
-					pullRequest: pullRequest{
-						Number:         456,
-						BaseRefName:    "main",
-						HeadRefName:    "bar",
-						HeadRepository: repository,
-						URL: githubv4.URI{URL: &url.URL{
-							Scheme: "https",
-							Host:   "github.com",
-							Path:   "/" + repository.path().String() + "/pull/456",
-						}},
-					},
-				},
-			},
-			want: []string{
-				stackFooterPreamble +
-					stackFooterStackIntro +
+			want: map[string]string{
+				"foo": stackFooterPreamble +
+					stackFooterRelatedSectionIntro +
 					" 1. *→ this pull request ←*\n" +
 					" 2. #456\n",
-				stackFooterPreamble +
+				"bar": stackFooterPreamble +
 					fmt.Sprintf(stackFooterChangesSection, "#123", "2 commits", "https://github.com/"+repository.path().String()+"/pull/456/changes/4567..89ab") +
-					stackFooterStackIntro +
+					stackFooterRelatedSectionIntro +
 					" 1. #123\n" +
 					" 2. *→ this pull request ←*\n",
+			},
+		},
+		{
+			name: "ForkPoint",
+			graph: mustDiffGraph(t,
+				[]*jujutsu.Commit{
+					{
+						ID:      jujutsu.CommitID{0xcd, 0xef},
+						Parents: []jujutsu.CommitID{{0x45, 0x67}},
+					},
+					{
+						ID:      jujutsu.CommitID{0x89, 0xab},
+						Parents: []jujutsu.CommitID{{0x45, 0x67}},
+					},
+					{
+						ID:      jujutsu.CommitID{0x45, 0x67},
+						Parents: []jujutsu.CommitID{{0x01, 0x23}},
+					},
+					{
+						ID:      jujutsu.CommitID{0x01, 0x23},
+						Parents: []jujutsu.CommitID{trunkPlaceholderCommitID()},
+					},
+				},
+				[]*jujutsu.Bookmark{
+					{
+						Name:        "a",
+						TargetMerge: jujutsu.Resolved(jujutsu.CommitID{0x01, 0x23}),
+					},
+					{
+						Name:        "b",
+						TargetMerge: jujutsu.Resolved(jujutsu.CommitID{0x45, 0x67}),
+					},
+					{
+						Name:        "c",
+						TargetMerge: jujutsu.Resolved(jujutsu.CommitID{0x89, 0xab}),
+					},
+					{
+						Name:        "d",
+						TargetMerge: jujutsu.Resolved(jujutsu.CommitID{0xcd, 0xef}),
+					},
+				},
+				[]string{"c", "d"},
+			),
+			prs: map[string]*pullRequest{
+				"a": {
+					Number:         123,
+					BaseRefName:    "main",
+					HeadRefName:    "a",
+					HeadRepository: repository,
+					URL: githubv4.URI{URL: &url.URL{
+						Scheme: "https",
+						Host:   "github.com",
+						Path:   "/" + repository.path().String() + "/pull/123",
+					}},
+				},
+				"b": {
+					Number:         4567,
+					BaseRefName:    "main",
+					HeadRefName:    "b",
+					HeadRepository: repository,
+					URL: githubv4.URI{URL: &url.URL{
+						Scheme: "https",
+						Host:   "github.com",
+						Path:   "/" + repository.path().String() + "/pull/4567",
+					}},
+				},
+				"c": {
+					Number:         8910,
+					BaseRefName:    "main",
+					HeadRefName:    "c",
+					HeadRepository: repository,
+					URL: githubv4.URI{URL: &url.URL{
+						Scheme: "https",
+						Host:   "github.com",
+						Path:   "/" + repository.path().String() + "/pull/8910",
+					}},
+				},
+				"d": {
+					Number:         9999,
+					BaseRefName:    "main",
+					HeadRefName:    "d",
+					HeadRepository: repository,
+					URL: githubv4.URI{URL: &url.URL{
+						Scheme: "https",
+						Host:   "github.com",
+						Path:   "/" + repository.path().String() + "/pull/9999",
+					}},
+				},
+			},
+			want: map[string]string{
+				"a": stackFooterPreamble +
+					stackFooterRelatedSectionIntro +
+					" 1. *→ this pull request ←*\n" +
+					" 2. #4567\n" +
+					" 3. …multiple pull requests…\n",
+				"b": stackFooterPreamble +
+					fmt.Sprintf(stackFooterChangesSection, "#123", "commit", "https://github.com/"+repository.path().String()+"/pull/4567/changes/4567") +
+					stackFooterRelatedSectionIntro +
+					" 1. #123\n" +
+					" 2. *→ this pull request ←*\n" +
+					"\n" +
+					stackFooterChildrenIntro +
+					"- #8910\n" +
+					"- #9999\n",
+				"c": stackFooterPreamble +
+					fmt.Sprintf(stackFooterChangesSection, "#4567", "commit", "https://github.com/"+repository.path().String()+"/pull/8910/changes/89ab") +
+					stackFooterRelatedSectionIntro +
+					" 1. #123\n" +
+					" 2. #4567\n" +
+					" 3. *→ this pull request ←*\n",
+				"d": stackFooterPreamble +
+					fmt.Sprintf(stackFooterChangesSection, "#4567", "commit", "https://github.com/"+repository.path().String()+"/pull/9999/changes/cdef") +
+					stackFooterRelatedSectionIntro +
+					" 1. #123\n" +
+					" 2. #4567\n" +
+					" 3. *→ this pull request ←*\n",
+			},
+		},
+		{
+			name: "ImmediateForkPoint",
+			graph: mustDiffGraph(t,
+				[]*jujutsu.Commit{
+					{
+						ID:      jujutsu.CommitID{0x89, 0xab},
+						Parents: []jujutsu.CommitID{{0x01, 0x23}},
+					},
+					{
+						ID:      jujutsu.CommitID{0x45, 0x67},
+						Parents: []jujutsu.CommitID{{0x01, 0x23}},
+					},
+					{
+						ID:      jujutsu.CommitID{0x01, 0x23},
+						Parents: []jujutsu.CommitID{trunkPlaceholderCommitID()},
+					},
+				},
+				[]*jujutsu.Bookmark{
+					{
+						Name:        "a",
+						TargetMerge: jujutsu.Resolved(jujutsu.CommitID{0x01, 0x23}),
+					},
+					{
+						Name:        "b",
+						TargetMerge: jujutsu.Resolved(jujutsu.CommitID{0x45, 0x67}),
+					},
+					{
+						Name:        "c",
+						TargetMerge: jujutsu.Resolved(jujutsu.CommitID{0x89, 0xab}),
+					},
+				},
+				[]string{"b", "c"},
+			),
+			prs: map[string]*pullRequest{
+				"a": {
+					Number:         123,
+					BaseRefName:    "main",
+					HeadRefName:    "a",
+					HeadRepository: repository,
+					URL: githubv4.URI{URL: &url.URL{
+						Scheme: "https",
+						Host:   "github.com",
+						Path:   "/" + repository.path().String() + "/pull/123",
+					}},
+				},
+				"b": {
+					Number:         4567,
+					BaseRefName:    "main",
+					HeadRefName:    "b",
+					HeadRepository: repository,
+					URL: githubv4.URI{URL: &url.URL{
+						Scheme: "https",
+						Host:   "github.com",
+						Path:   "/" + repository.path().String() + "/pull/4567",
+					}},
+				},
+				"c": {
+					Number:         8910,
+					BaseRefName:    "main",
+					HeadRefName:    "c",
+					HeadRepository: repository,
+					URL: githubv4.URI{URL: &url.URL{
+						Scheme: "https",
+						Host:   "github.com",
+						Path:   "/" + repository.path().String() + "/pull/8910",
+					}},
+				},
+			},
+			want: map[string]string{
+				"a": stackFooterPreamble +
+					stackFooterRelatedSectionIntro +
+					stackFooterChildrenIntro +
+					"- #4567\n" +
+					"- #8910\n",
+				"b": stackFooterPreamble +
+					fmt.Sprintf(stackFooterChangesSection, "#123", "commit", "https://github.com/"+repository.path().String()+"/pull/4567/changes/4567") +
+					stackFooterRelatedSectionIntro +
+					" 1. #123\n" +
+					" 2. *→ this pull request ←*\n",
+				"c": stackFooterPreamble +
+					fmt.Sprintf(stackFooterChangesSection, "#123", "commit", "https://github.com/"+repository.path().String()+"/pull/8910/changes/89ab") +
+					stackFooterRelatedSectionIntro +
+					" 1. #123\n" +
+					" 2. *→ this pull request ←*\n",
+			},
+		},
+		{
+			name: "MergePoint",
+			graph: mustDiffGraph(t,
+				[]*jujutsu.Commit{
+					{
+						ID:      jujutsu.CommitID{0xcd, 0xef},
+						Parents: []jujutsu.CommitID{{0x89, 0xab}},
+					},
+					{
+						ID:      jujutsu.CommitID{0x89, 0xab},
+						Parents: []jujutsu.CommitID{{0x01, 0x23}, {0x45, 0x67}},
+					},
+					{
+						ID:      jujutsu.CommitID{0x45, 0x67},
+						Parents: []jujutsu.CommitID{trunkPlaceholderCommitID()},
+					},
+					{
+						ID:      jujutsu.CommitID{0x01, 0x23},
+						Parents: []jujutsu.CommitID{trunkPlaceholderCommitID()},
+					},
+				},
+				[]*jujutsu.Bookmark{
+					{
+						Name:        "a",
+						TargetMerge: jujutsu.Resolved(jujutsu.CommitID{0x01, 0x23}),
+					},
+					{
+						Name:        "b",
+						TargetMerge: jujutsu.Resolved(jujutsu.CommitID{0x45, 0x67}),
+					},
+					{
+						Name:        "c",
+						TargetMerge: jujutsu.Resolved(jujutsu.CommitID{0x89, 0xab}),
+					},
+					{
+						Name:        "d",
+						TargetMerge: jujutsu.Resolved(jujutsu.CommitID{0xcd, 0xef}),
+					},
+				},
+				[]string{"c", "d"},
+			),
+			prs: map[string]*pullRequest{
+				"a": {
+					Number:         123,
+					BaseRefName:    "main",
+					HeadRefName:    "a",
+					HeadRepository: repository,
+					URL: githubv4.URI{URL: &url.URL{
+						Scheme: "https",
+						Host:   "github.com",
+						Path:   "/" + repository.path().String() + "/pull/123",
+					}},
+				},
+				"b": {
+					Number:         4567,
+					BaseRefName:    "main",
+					HeadRefName:    "b",
+					HeadRepository: repository,
+					URL: githubv4.URI{URL: &url.URL{
+						Scheme: "https",
+						Host:   "github.com",
+						Path:   "/" + repository.path().String() + "/pull/4567",
+					}},
+				},
+				"c": {
+					Number:         8910,
+					BaseRefName:    "main",
+					HeadRefName:    "c",
+					HeadRepository: repository,
+					URL: githubv4.URI{URL: &url.URL{
+						Scheme: "https",
+						Host:   "github.com",
+						Path:   "/" + repository.path().String() + "/pull/8910",
+					}},
+				},
+				"d": {
+					Number:         9999,
+					BaseRefName:    "main",
+					HeadRefName:    "d",
+					HeadRepository: repository,
+					URL: githubv4.URI{URL: &url.URL{
+						Scheme: "https",
+						Host:   "github.com",
+						Path:   "/" + repository.path().String() + "/pull/9999",
+					}},
+				},
+			},
+			want: map[string]string{
+				"a": stackFooterPreamble +
+					stackFooterRelatedSectionIntro +
+					" 1. *→ this pull request ←*\n" +
+					" 2. #8910\n" +
+					" 3. #9999\n",
+				"b": stackFooterPreamble +
+					stackFooterRelatedSectionIntro +
+					" 1. *→ this pull request ←*\n" +
+					" 2. #8910\n" +
+					" 3. #9999\n",
+				"c": stackFooterPreamble +
+					fmt.Sprintf(stackFooterChangesSection, "#123 and #4567", "commit", "https://github.com/"+repository.path().String()+"/pull/8910/changes/89ab") +
+					stackFooterRelatedSectionIntro +
+					stackFooterParentsIntro +
+					"- #123\n" +
+					"- #4567\n" +
+					"\n" +
+					stackFooterChildrenIntro +
+					"- #9999\n",
+				"d": stackFooterPreamble +
+					fmt.Sprintf(stackFooterChangesSection, "#8910", "commit", "https://github.com/"+repository.path().String()+"/pull/9999/changes/cdef") +
+					stackFooterRelatedSectionIntro +
+					"- …multiple pull requests…\n" +
+					"- #8910\n" +
+					"- *→ this pull request ←*\n",
 			},
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			for i, want := range test.want {
+			for diff := range test.graph.walk() {
+				diff.pullRequest = test.prs[diff.name]
+			}
+			artifactsDir := t.ArtifactDir()
+			for name, want := range test.want {
+				artifactPath := filepath.Join(artifactsDir, test.name+"_"+name+".md")
+				if err := os.WriteFile(artifactPath, []byte(want), 0o666); err != nil {
+					t.Log(err)
+				}
+
+				sd := test.graph.byName(name)
+				if sd == nil {
+					t.Fatal("No pull request in graph for", name)
+					continue
+				}
 				sb := new(strings.Builder)
-				writeStackFooter(sb, new(test.stack[i]), test.plan, i)
+				writeStackFooter(sb, sd)
 				got := sb.String()
 				if diff := cmp.Diff(want, got); diff != "" {
-					t.Errorf("footer for stack[%d] (-want +got):\n%s", i, diff)
+					t.Errorf("footer for %s (-want +got):\n%s", name, diff)
 				}
 			}
 		})
