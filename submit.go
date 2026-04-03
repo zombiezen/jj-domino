@@ -244,6 +244,9 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 	if planError != nil {
 		return planError
 	}
+	for diff := range graph.walk() {
+		diff.pullRequest.IsDraft = githubv4.Boolean(c.Draft || len(diff.parents) > 0)
+	}
 
 	// Edit pull request titles/bodies.
 	if c.DryRun {
