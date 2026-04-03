@@ -580,7 +580,7 @@ const (
 		"<!-- Do not remove this comment! Everything in this section will be rewritten by jj-domino. -->" +
 		"\n\n"
 	stackFooterChangesSection = "" +
-		"## View Changes\n\n" +
+		"## How to Review\n\n" +
 		"This pull request is a draft because it is intended to be merged after %s. " +
 		"The new changes are in the [last %s](%s)." +
 		"\n\n"
