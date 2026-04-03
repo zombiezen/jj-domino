@@ -329,8 +329,8 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 	if c.DryRun {
 		sb := new(strings.Builder)
 		for _, pr := range plan {
+			writeLogLine(sb, &pr.pullRequest, logOptions)
 			if pr.ID == nil {
-				writeLogLine(sb, &pr.pullRequest, logOptions)
 				sb.WriteString(" (new)")
 			}
 			sb.WriteString("\n")
