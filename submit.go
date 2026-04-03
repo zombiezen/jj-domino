@@ -180,7 +180,10 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 		plan[0].IsDraft = githubv4.Boolean(c.Draft)
 		sb := new(strings.Builder)
 		for _, pr := range plan {
-			pr.writeLogLine(sb, defaultPRNumberWidth, false)
+			writeLogLine(sb, &pr.pullRequest, logLineOptions{
+				baseRepositoryPath: baseRepoPath,
+				prNumberWidth:      defaultPRNumberWidth,
+			})
 			sb.WriteString("\n")
 		}
 		io.WriteString(k.Stdout, sb.String())
@@ -307,9 +310,10 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 		io.WriteString(pushOutput, "\n")
 	}
 
-	stdoutANSIEscapes := useANSIEscapes(k.Stdout, lookupEnvMapFunc(global.environ))
-	if c.DryRun {
-		prNumberWidth := cmp.Or(maxIntWidth(func(yield func(githubv4.Int) bool) {
+	logOptions := logLineOptions{
+		baseRepositoryPath: baseRepoPath,
+		link:               useANSIEscapes(k.Stdout, lookupEnvMapFunc(global.environ)),
+		prNumberWidth: cmp.Or(maxIntWidth(func(yield func(githubv4.Int) bool) {
 			for _, pr := range plan {
 				if pr.ID != nil {
 					if !yield(pr.Number) {
@@ -317,10 +321,12 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 					}
 				}
 			}
-		}), defaultPRNumberWidth)
+		}), defaultPRNumberWidth),
+	}
+	if c.DryRun {
 		sb := new(strings.Builder)
 		for _, pr := range plan {
-			pr.writeLogLine(sb, prNumberWidth, stdoutANSIEscapes)
+			writeLogLine(sb, &pr.pullRequest, logOptions)
 			if pr.ID == nil {
 				sb.WriteString(" (new)")
 			}
@@ -329,16 +335,6 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 		io.WriteString(k.Stdout, sb.String())
 		return nil
 	}
-
-	prNumberWidth := cmp.Or(maxIntWidth(func(yield func(githubv4.Int) bool) {
-		for _, pr := range plan {
-			if pr.ID != nil {
-				if !yield(pr.Number) {
-					return
-				}
-			}
-		}
-	}), defaultPRNumberWidth)
 
 	// Create all the new pull requests first so we have the numbers.
 	// We need the pull request numbers/URLs for the stack footer.
@@ -350,11 +346,11 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 		if err := createPullRequest(ctx, gitHubClient, baseRepo, &pr.pullRequest); err != nil {
 			return err
 		}
-		prNumberWidth = max(prNumberWidth, maxIntWidth(func(yield func(githubv4.Int) bool) {
-			yield(pr.Number)
+		logOptions.prNumberWidth = max(logOptions.prNumberWidth, maxIntWidth(func(yield func(githubv4.Int) bool) {
+			yield(pr.pullRequest.Number)
 		}))
 		sb := new(strings.Builder)
-		pr.writeLogLine(sb, prNumberWidth, stdoutANSIEscapes)
+		writeLogLine(sb, &pr.pullRequest, logOptions)
 		sb.WriteString(" (new)\n")
 		io.WriteString(k.Stdout, sb.String())
 	}
@@ -377,7 +373,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 			}
 
 			sb := new(strings.Builder)
-			pr.writeLogLine(sb, prNumberWidth, stdoutANSIEscapes)
+			writeLogLine(sb, &pr.pullRequest, logOptions)
 			sb.WriteString("\n")
 			io.WriteString(k.Stdout, sb.String())
 		}
@@ -526,13 +522,19 @@ func planPullRequests(baseRepoPath gitHubRepositoryPath, baseRefName string, tem
 	return plan
 }
 
-func (pr *plannedPullRequest) writeLogLine(sb *strings.Builder, prNumberWidth int, link bool) {
+type logLineOptions struct {
+	baseRepositoryPath gitHubRepositoryPath
+	prNumberWidth      int
+	link               bool
+}
+
+func writeLogLine(sb *strings.Builder, pr *pullRequest, opts logLineOptions) {
 	wroteLink := false
 	if pr.ID == nil {
-		sb.WriteString(prNumberPlaceholder(prNumberWidth))
+		sb.WriteString(prNumberPlaceholder(opts.prNumberWidth))
 	} else {
-		formatted := formatPRNumber(pr.Number, prNumberWidth)
-		if link && pr.URL.URL != nil {
+		formatted := formatPRNumber(pr.Number, opts.prNumberWidth)
+		if opts.link && pr.URL.URL != nil {
 			i := strings.IndexByte(formatted, '#')
 			sb.WriteString(formatted[:i])
 			sb.WriteString(osc + "8;;")
@@ -554,12 +556,12 @@ func (pr *plannedPullRequest) writeLogLine(sb *strings.Builder, prNumberWidth in
 	}
 
 	sb.WriteString(" [")
-	if pr.HeadRepository.path() == pr.baseRepositoryPath {
+	if pr.HeadRepository.path() == opts.baseRepositoryPath {
 		sb.WriteString(string(pr.BaseRefName))
 		sb.WriteString(" ← ")
 		sb.WriteString(string(pr.HeadRefName))
 	} else {
-		sb.WriteString(pr.baseRepositoryPath.Owner)
+		sb.WriteString(opts.baseRepositoryPath.Owner)
 		sb.WriteString(":")
 		sb.WriteString(string(pr.BaseRefName))
 		sb.WriteString(" ← ")
