@@ -64,16 +64,16 @@ func editPullRequestMessages(prs []*pullRequest, edit func(initialContent []byte
 	if len(prs) > 1 {
 		initialContent = []byte(editorPreamble)
 	}
-	for _, diff := range prs {
+	for _, pr := range prs {
 		if len(prs) > 1 {
 			initialContent = append(initialContent, editorSeparatorPrefix...)
-			initialContent = append(initialContent, diff.HeadRefName...)
+			initialContent = append(initialContent, pr.HeadRefName...)
 			initialContent = append(initialContent, editorSeparatorSuffix...)
 		}
-		initialContent = append(initialContent, diff.Title...)
-		if diff.Body != "" {
+		initialContent = append(initialContent, pr.Title...)
+		if pr.Body != "" {
 			initialContent = append(initialContent, "\n\n"...)
-			initialContent = append(initialContent, strings.TrimRight(string(diff.Body), "\n")...)
+			initialContent = append(initialContent, strings.TrimRight(string(pr.Body), "\n")...)
 		}
 		initialContent = append(initialContent, "\n\n"...)
 	}
@@ -199,7 +199,7 @@ func parseMultiPREditor(prs []*pullRequest, editorContent []byte) (err error) {
 	found := make([]bool, len(prs))
 	for headRefName != "" {
 		i := slices.IndexFunc(prs, func(pr *pullRequest) bool {
-			return string(pr.HeadRefName) == headRefName
+			return pr.HeadRefName == githubv4.String(headRefName)
 		})
 		if i == -1 {
 			return fmt.Errorf("unknown bookmark name %s", headRefName)
