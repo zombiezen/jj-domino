@@ -383,7 +383,7 @@ func TestWriteStackFooter(t *testing.T) {
 			},
 		},
 		{
-			name: "MergePoint",
+			name: "MergePoint2",
 			graph: mustDiffGraph(t,
 				[]*jujutsu.Commit{
 					{
@@ -495,6 +495,115 @@ func TestWriteStackFooter(t *testing.T) {
 					"- …multiple pull requests…\n" +
 					"- #8910\n" +
 					"- *→ this pull request ←*\n",
+			},
+		},
+		{
+			name: "MergePoint3",
+			graph: mustDiffGraph(t,
+				[]*jujutsu.Commit{
+					{
+						ID:      jujutsu.CommitID{0xcd, 0xef},
+						Parents: []jujutsu.CommitID{{0x01, 0x23}, {0x45, 0x67}, {0x89, 0xab}},
+					},
+					{
+						ID:      jujutsu.CommitID{0x89, 0xab},
+						Parents: []jujutsu.CommitID{trunkPlaceholderCommitID()},
+					},
+					{
+						ID:      jujutsu.CommitID{0x45, 0x67},
+						Parents: []jujutsu.CommitID{trunkPlaceholderCommitID()},
+					},
+					{
+						ID:      jujutsu.CommitID{0x01, 0x23},
+						Parents: []jujutsu.CommitID{trunkPlaceholderCommitID()},
+					},
+				},
+				[]*jujutsu.Bookmark{
+					{
+						Name:        "a",
+						TargetMerge: jujutsu.Resolved(jujutsu.CommitID{0x01, 0x23}),
+					},
+					{
+						Name:        "b",
+						TargetMerge: jujutsu.Resolved(jujutsu.CommitID{0x45, 0x67}),
+					},
+					{
+						Name:        "c",
+						TargetMerge: jujutsu.Resolved(jujutsu.CommitID{0x89, 0xab}),
+					},
+					{
+						Name:        "d",
+						TargetMerge: jujutsu.Resolved(jujutsu.CommitID{0xcd, 0xef}),
+					},
+				},
+				[]string{"d"},
+			),
+			prs: map[string]*pullRequest{
+				"a": {
+					Number:         123,
+					BaseRefName:    "main",
+					HeadRefName:    "a",
+					HeadRepository: repository,
+					URL: githubv4.URI{URL: &url.URL{
+						Scheme: "https",
+						Host:   "github.com",
+						Path:   "/" + repository.path().String() + "/pull/123",
+					}},
+				},
+				"b": {
+					Number:         4567,
+					BaseRefName:    "main",
+					HeadRefName:    "b",
+					HeadRepository: repository,
+					URL: githubv4.URI{URL: &url.URL{
+						Scheme: "https",
+						Host:   "github.com",
+						Path:   "/" + repository.path().String() + "/pull/4567",
+					}},
+				},
+				"c": {
+					Number:         8910,
+					BaseRefName:    "main",
+					HeadRefName:    "c",
+					HeadRepository: repository,
+					URL: githubv4.URI{URL: &url.URL{
+						Scheme: "https",
+						Host:   "github.com",
+						Path:   "/" + repository.path().String() + "/pull/8910",
+					}},
+				},
+				"d": {
+					Number:         9999,
+					BaseRefName:    "main",
+					HeadRefName:    "d",
+					HeadRepository: repository,
+					URL: githubv4.URI{URL: &url.URL{
+						Scheme: "https",
+						Host:   "github.com",
+						Path:   "/" + repository.path().String() + "/pull/9999",
+					}},
+				},
+			},
+			want: map[string]string{
+				"a": stackFooterPreamble +
+					stackFooterRelatedSectionIntro +
+					" 1. *→ this pull request ←*\n" +
+					" 2. #9999\n",
+				"b": stackFooterPreamble +
+					stackFooterRelatedSectionIntro +
+					" 1. *→ this pull request ←*\n" +
+					" 2. #9999\n",
+				"c": stackFooterPreamble +
+					stackFooterRelatedSectionIntro +
+					" 1. *→ this pull request ←*\n" +
+					" 2. #9999\n",
+				"d": stackFooterPreamble +
+					fmt.Sprintf(stackFooterChangesSection, "#123, #4567, and #8910", "commit", "https://github.com/"+repository.path().String()+"/pull/9999/changes/cdef") +
+					stackFooterRelatedSectionIntro +
+					stackFooterParentsIntro +
+					"- #123\n" +
+					"- #4567\n" +
+					"- #8910\n",
 			},
 		},
 	}

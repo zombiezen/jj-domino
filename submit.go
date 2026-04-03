@@ -664,6 +664,7 @@ func writeStackFooterChanges(sb *strings.Builder, diff *stackedDiff) {
 			}
 			fmt.Fprintf(sb, "#%d", parent.pullRequest.Number)
 		}
+		parentsString = sb.String()
 	}
 	var commitsPhrase string
 	if n := diff.len(); n == 1 {
