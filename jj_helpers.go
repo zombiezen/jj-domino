@@ -193,15 +193,29 @@ func (err noBookmarksError) Error() string {
 }
 
 // joinRevsets returns a revset that represents a union of the given revsets.
-func joinRevsets(revsets []string) string {
-	if len(revsets) == 0 {
+func joinRevsets(revsets iter.Seq[string]) string {
+	next, stop := iter.Pull(revsets)
+	defer stop()
+
+	r0, ok := next()
+	if !ok {
 		return "none()"
+	}
+	r1, ok := next()
+	if !ok {
+		return "(" + r0 + ")"
 	}
 
 	sb := new(strings.Builder)
 	sb.WriteString("((")
-	sb.WriteString(revsets[0])
-	for _, r := range revsets[1:] {
+	sb.WriteString(r0)
+	sb.WriteString(")|(")
+	sb.WriteString(r1)
+	for {
+		r, ok := next()
+		if !ok {
+			break
+		}
 		sb.WriteString(")|(")
 		sb.WriteString(r)
 	}

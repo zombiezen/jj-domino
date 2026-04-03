@@ -428,7 +428,7 @@ func (c *submitCmd) shouldCreatePushBookmarks() bool {
 // pushChanges runs "jj git push -c c.Changes"
 // and returns the head commit from the revset defined by c.Changes.
 func (c *submitCmd) pushChanges(ctx context.Context, jj *jujutsu.Jujutsu, baseRef jujutsu.RefSymbol, pushRemoteName string, pushOutput io.Writer) (*jujutsu.Commit, error) {
-	revset := joinRevsets(c.Changes)
+	revset := joinRevsets(slices.Values(c.Changes))
 	if hasBase, err := isNonEmptyRevset(ctx, jj, revset+" & ::"+baseRef.String()); err != nil {
 		return nil, fmt.Errorf("check for overlaps with %v: %v", baseRef, err)
 	} else if hasBase {
@@ -473,7 +473,7 @@ func (c *submitCmd) pushChanges(ctx context.Context, jj *jujutsu.Jujutsu, baseRe
 func (c *submitCmd) findStackHeadFromRevisions(ctx context.Context, jj *jujutsu.Jujutsu, baseRef jujutsu.RefSymbol) (*jujutsu.Commit, error) {
 	var revset string
 	if len(c.Revisions) > 0 {
-		revset = joinRevsets(c.Revisions)
+		revset = joinRevsets(slices.Values(c.Revisions))
 	} else {
 		revset = "(" + baseRef.String() + "..@)"
 	}
