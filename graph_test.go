@@ -386,6 +386,69 @@ func TestNewDiffGraph(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "MultipleMergePoints",
+			commits: []*jujutsu.Commit{
+				{
+					ID:      jujutsu.CommitID{0xcd, 0xef},
+					Parents: []jujutsu.CommitID{{0x89, 0xab}, {0x45, 0x67}},
+				},
+				{
+					ID:      jujutsu.CommitID{0x89, 0xab},
+					Parents: []jujutsu.CommitID{{0x01, 0x23}},
+				},
+				{
+					ID:      jujutsu.CommitID{0x45, 0x67},
+					Parents: []jujutsu.CommitID{trunkPlaceholderCommitID()},
+				},
+				{
+					ID:      jujutsu.CommitID{0x01, 0x23},
+					Parents: []jujutsu.CommitID{trunkPlaceholderCommitID()},
+				},
+			},
+			bookmarks: []*jujutsu.Bookmark{
+				{
+					Name:        "a",
+					TargetMerge: jujutsu.Resolved(jujutsu.CommitID{0x01, 0x23}),
+				},
+				{
+					Name:        "b",
+					TargetMerge: jujutsu.Resolved(jujutsu.CommitID{0x45, 0x67}),
+				},
+				{
+					Name:        "c",
+					TargetMerge: jujutsu.Resolved(jujutsu.CommitID{0xcd, 0xef}),
+				},
+			},
+			selectedBookmarkNames: []string{"c"},
+			want: func(commits []*jujutsu.Commit) diffGraph {
+				a := &stackedDiff{
+					localCommitRef: localCommitRef{
+						name:   "a",
+						commit: commits[3],
+					},
+				}
+				b := &stackedDiff{
+					localCommitRef: localCommitRef{
+						name:   "b",
+						commit: commits[2],
+					},
+				}
+				c := &stackedDiff{
+					localCommitRef: localCommitRef{
+						name:   "c",
+						commit: commits[0],
+					},
+					uniqueAncestors: []*jujutsu.Commit{commits[1]},
+				}
+				c.parents = []*stackedDiff{b, a}
+				a.children = []*stackedDiff{c}
+				b.children = []*stackedDiff{c}
+				return diffGraph{
+					roots: []*stackedDiff{a, b},
+				}
+			},
+		},
 	}
 
 	for _, test := range tests {
