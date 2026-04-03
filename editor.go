@@ -56,7 +56,7 @@ const (
 		editorCommentPrefix + " Lines starting with `" + editorCommentPrefix + "` (like this one) will be removed.\n"
 )
 
-func editPullRequestMessages(prs []*plannedPullRequest, edit func(initialContent []byte) ([]byte, error)) (err error) {
+func editPullRequestMessages(prs []*pullRequest, edit func(initialContent []byte) ([]byte, error)) (err error) {
 	if len(prs) == 0 {
 		return errors.New("edit pull request messages: no pull requests to edit")
 	}
@@ -98,7 +98,7 @@ func editPullRequestMessages(prs []*plannedPullRequest, edit func(initialContent
 	return nil
 }
 
-func parseSinglePREditor(pr *plannedPullRequest, editorContent []byte) (err error) {
+func parseSinglePREditor(pr *pullRequest, editorContent []byte) (err error) {
 	defer func() {
 		if err != nil {
 			err = &editorParseError{
@@ -160,7 +160,7 @@ func parseSinglePREditor(pr *plannedPullRequest, editorContent []byte) (err erro
 	return nil
 }
 
-func parseMultiPREditor(prs []*plannedPullRequest, editorContent []byte) (err error) {
+func parseMultiPREditor(prs []*pullRequest, editorContent []byte) (err error) {
 	defer func() {
 		if err != nil {
 			err = &editorParseError{
@@ -198,7 +198,7 @@ func parseMultiPREditor(prs []*plannedPullRequest, editorContent []byte) (err er
 	// Read pull request content.
 	found := make([]bool, len(prs))
 	for headRefName != "" {
-		i := slices.IndexFunc(prs, func(pr *plannedPullRequest) bool {
+		i := slices.IndexFunc(prs, func(pr *pullRequest) bool {
 			return pr.HeadRefName == githubv4.String(headRefName)
 		})
 		if i == -1 {

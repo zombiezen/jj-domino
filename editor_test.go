@@ -40,22 +40,20 @@ import (
 func TestEditPullRequestMessages(t *testing.T) {
 	tests := []struct {
 		name          string
-		pullRequests  []*plannedPullRequest
+		pullRequests  []*pullRequest
 		editedContent string
 
-		want               []*plannedPullRequest
+		want               []*pullRequest
 		wantInitialContent string
 		err                bool
 	}{
 		{
 			name: "SinglePullRequest",
-			pullRequests: []*plannedPullRequest{
+			pullRequests: []*pullRequest{
 				{
-					pullRequest: pullRequest{
-						HeadRefName: "zombiezen/foo",
-						Title:       "Hello World",
-						Body:        "This changes things.",
-					},
+					HeadRefName: "zombiezen/foo",
+					Title:       "Hello World",
+					Body:        "This changes things.",
 				},
 			},
 			wantInitialContent: "" +
@@ -66,25 +64,21 @@ func TestEditPullRequestMessages(t *testing.T) {
 				"Hello Universe\n\n" +
 				"This changes *EVERYTHING*.\n" +
 				editorPostscript,
-			want: []*plannedPullRequest{
+			want: []*pullRequest{
 				{
-					pullRequest: pullRequest{
-						HeadRefName: "zombiezen/foo",
-						Title:       "Hello Universe",
-						Body:        "This changes *EVERYTHING*.",
-					},
+					HeadRefName: "zombiezen/foo",
+					Title:       "Hello Universe",
+					Body:        "This changes *EVERYTHING*.",
 				},
 			},
 		},
 		{
 			name: "CommentsInBody",
-			pullRequests: []*plannedPullRequest{
+			pullRequests: []*pullRequest{
 				{
-					pullRequest: pullRequest{
-						HeadRefName: "zombiezen/foo",
-						Title:       "Hello World",
-						Body:        "This changes things.",
-					},
+					HeadRefName: "zombiezen/foo",
+					Title:       "Hello World",
+					Body:        "This changes things.",
 				},
 			},
 			wantInitialContent: "" +
@@ -97,25 +91,21 @@ func TestEditPullRequestMessages(t *testing.T) {
 				editorCommentPrefix + " Some choice commentary here.\n" +
 				"I can't believe it.\n" +
 				editorPostscript,
-			want: []*plannedPullRequest{
+			want: []*pullRequest{
 				{
-					pullRequest: pullRequest{
-						HeadRefName: "zombiezen/foo",
-						Title:       "Hello Universe",
-						Body:        "This changes *EVERYTHING*.\nI can't believe it.",
-					},
+					HeadRefName: "zombiezen/foo",
+					Title:       "Hello Universe",
+					Body:        "This changes *EVERYTHING*.\nI can't believe it.",
 				},
 			},
 		},
 		{
 			name: "TrailingNewlinesInBody",
-			pullRequests: []*plannedPullRequest{
+			pullRequests: []*pullRequest{
 				{
-					pullRequest: pullRequest{
-						HeadRefName: "zombiezen/foo",
-						Title:       "Hello World",
-						Body:        "This changes things.\n\n\n\n\n",
-					},
+					HeadRefName: "zombiezen/foo",
+					Title:       "Hello World",
+					Body:        "This changes things.\n\n\n\n\n",
 				},
 			},
 			wantInitialContent: "" +
@@ -126,25 +116,21 @@ func TestEditPullRequestMessages(t *testing.T) {
 				"Hello Universe\n\n" +
 				"This changes *EVERYTHING*.\n" +
 				editorPostscript,
-			want: []*plannedPullRequest{
+			want: []*pullRequest{
 				{
-					pullRequest: pullRequest{
-						HeadRefName: "zombiezen/foo",
-						Title:       "Hello Universe",
-						Body:        "This changes *EVERYTHING*.",
-					},
+					HeadRefName: "zombiezen/foo",
+					Title:       "Hello Universe",
+					Body:        "This changes *EVERYTHING*.",
 				},
 			},
 		},
 		{
 			name: "MissingMessage",
-			pullRequests: []*plannedPullRequest{
+			pullRequests: []*pullRequest{
 				{
-					pullRequest: pullRequest{
-						HeadRefName: "zombiezen/foo",
-						Title:       "Hello World",
-						Body:        "This changes things.",
-					},
+					HeadRefName: "zombiezen/foo",
+					Title:       "Hello World",
+					Body:        "This changes things.",
 				},
 			},
 			wantInitialContent: "" +
@@ -158,13 +144,11 @@ func TestEditPullRequestMessages(t *testing.T) {
 		},
 		{
 			name: "RemoveBody",
-			pullRequests: []*plannedPullRequest{
+			pullRequests: []*pullRequest{
 				{
-					pullRequest: pullRequest{
-						HeadRefName: "zombiezen/foo",
-						Title:       "Hello World",
-						Body:        "This changes things.",
-					},
+					HeadRefName: "zombiezen/foo",
+					Title:       "Hello World",
+					Body:        "This changes things.",
 				},
 			},
 			wantInitialContent: "" +
@@ -174,24 +158,20 @@ func TestEditPullRequestMessages(t *testing.T) {
 			editedContent: "" +
 				"Hello Nothing\n\n" +
 				editorPostscript,
-			want: []*plannedPullRequest{
+			want: []*pullRequest{
 				{
-					pullRequest: pullRequest{
-						HeadRefName: "zombiezen/foo",
-						Title:       "Hello Nothing",
-						Body:        "",
-					},
+					HeadRefName: "zombiezen/foo",
+					Title:       "Hello Nothing",
+					Body:        "",
 				},
 			},
 		},
 		{
 			name: "AddBody",
-			pullRequests: []*plannedPullRequest{
+			pullRequests: []*pullRequest{
 				{
-					pullRequest: pullRequest{
-						HeadRefName: "zombiezen/foo",
-						Title:       "Hello World",
-					},
+					HeadRefName: "zombiezen/foo",
+					Title:       "Hello World",
 				},
 			},
 			wantInitialContent: "" +
@@ -201,32 +181,26 @@ func TestEditPullRequestMessages(t *testing.T) {
 				"Hello new body\n\n" +
 				"wo\n" +
 				editorPostscript,
-			want: []*plannedPullRequest{
+			want: []*pullRequest{
 				{
-					pullRequest: pullRequest{
-						HeadRefName: "zombiezen/foo",
-						Title:       "Hello new body",
-						Body:        "wo",
-					},
+					HeadRefName: "zombiezen/foo",
+					Title:       "Hello new body",
+					Body:        "wo",
 				},
 			},
 		},
 		{
 			name: "MultiplePullRequests",
-			pullRequests: []*plannedPullRequest{
+			pullRequests: []*pullRequest{
 				{
-					pullRequest: pullRequest{
-						HeadRefName: "zombiezen/foo",
-						Title:       "Hello World",
-						Body:        "This changes things.",
-					},
+					HeadRefName: "zombiezen/foo",
+					Title:       "Hello World",
+					Body:        "This changes things.",
 				},
 				{
-					pullRequest: pullRequest{
-						HeadRefName: "zombiezen/bar",
-						Title:       "Endgame",
-						Body:        "Checkmate!",
-					},
+					HeadRefName: "zombiezen/bar",
+					Title:       "Endgame",
+					Body:        "Checkmate!",
 				},
 			},
 			wantInitialContent: editorPreamble +
@@ -245,39 +219,31 @@ func TestEditPullRequestMessages(t *testing.T) {
 				"Close to Endgame\n\n" +
 				"Check\n\n" +
 				editorPostscript,
-			want: []*plannedPullRequest{
+			want: []*pullRequest{
 				{
-					pullRequest: pullRequest{
-						HeadRefName: "zombiezen/foo",
-						Title:       "Hello Universe",
-						Body:        "This changes *EVERYTHING*.",
-					},
+					HeadRefName: "zombiezen/foo",
+					Title:       "Hello Universe",
+					Body:        "This changes *EVERYTHING*.",
 				},
 				{
-					pullRequest: pullRequest{
-						HeadRefName: "zombiezen/bar",
-						Title:       "Close to Endgame",
-						Body:        "Check",
-					},
+					HeadRefName: "zombiezen/bar",
+					Title:       "Close to Endgame",
+					Body:        "Check",
 				},
 			},
 		},
 		{
 			name: "MultiplePullRequestsReordered",
-			pullRequests: []*plannedPullRequest{
+			pullRequests: []*pullRequest{
 				{
-					pullRequest: pullRequest{
-						HeadRefName: "zombiezen/foo",
-						Title:       "Hello World",
-						Body:        "This changes things.",
-					},
+					HeadRefName: "zombiezen/foo",
+					Title:       "Hello World",
+					Body:        "This changes things.",
 				},
 				{
-					pullRequest: pullRequest{
-						HeadRefName: "zombiezen/bar",
-						Title:       "Endgame",
-						Body:        "Checkmate!",
-					},
+					HeadRefName: "zombiezen/bar",
+					Title:       "Endgame",
+					Body:        "Checkmate!",
 				},
 			},
 			wantInitialContent: editorPreamble +
@@ -296,39 +262,31 @@ func TestEditPullRequestMessages(t *testing.T) {
 				"Hello Universe\n\n" +
 				"This changes *EVERYTHING*.\n" +
 				editorPostscript,
-			want: []*plannedPullRequest{
+			want: []*pullRequest{
 				{
-					pullRequest: pullRequest{
-						HeadRefName: "zombiezen/foo",
-						Title:       "Hello Universe",
-						Body:        "This changes *EVERYTHING*.",
-					},
+					HeadRefName: "zombiezen/foo",
+					Title:       "Hello Universe",
+					Body:        "This changes *EVERYTHING*.",
 				},
 				{
-					pullRequest: pullRequest{
-						HeadRefName: "zombiezen/bar",
-						Title:       "Close to Endgame",
-						Body:        "Check",
-					},
+					HeadRefName: "zombiezen/bar",
+					Title:       "Close to Endgame",
+					Body:        "Check",
 				},
 			},
 		},
 		{
 			name: "DuplicateMarkers",
-			pullRequests: []*plannedPullRequest{
+			pullRequests: []*pullRequest{
 				{
-					pullRequest: pullRequest{
-						HeadRefName: "zombiezen/foo",
-						Title:       "Hello World",
-						Body:        "This changes things.",
-					},
+					HeadRefName: "zombiezen/foo",
+					Title:       "Hello World",
+					Body:        "This changes things.",
 				},
 				{
-					pullRequest: pullRequest{
-						HeadRefName: "zombiezen/bar",
-						Title:       "Endgame",
-						Body:        "Checkmate!",
-					},
+					HeadRefName: "zombiezen/bar",
+					Title:       "Endgame",
+					Body:        "Checkmate!",
 				},
 			},
 			wantInitialContent: editorPreamble +
@@ -353,20 +311,16 @@ func TestEditPullRequestMessages(t *testing.T) {
 		},
 		{
 			name: "ExtraMarker",
-			pullRequests: []*plannedPullRequest{
+			pullRequests: []*pullRequest{
 				{
-					pullRequest: pullRequest{
-						HeadRefName: "zombiezen/foo",
-						Title:       "Hello World",
-						Body:        "This changes things.",
-					},
+					HeadRefName: "zombiezen/foo",
+					Title:       "Hello World",
+					Body:        "This changes things.",
 				},
 				{
-					pullRequest: pullRequest{
-						HeadRefName: "zombiezen/bar",
-						Title:       "Endgame",
-						Body:        "Checkmate!",
-					},
+					HeadRefName: "zombiezen/bar",
+					Title:       "Endgame",
+					Body:        "Checkmate!",
 				},
 			},
 			wantInitialContent: editorPreamble +
@@ -391,20 +345,16 @@ func TestEditPullRequestMessages(t *testing.T) {
 		},
 		{
 			name: "MissingMarker",
-			pullRequests: []*plannedPullRequest{
+			pullRequests: []*pullRequest{
 				{
-					pullRequest: pullRequest{
-						HeadRefName: "zombiezen/foo",
-						Title:       "Hello World",
-						Body:        "This changes things.",
-					},
+					HeadRefName: "zombiezen/foo",
+					Title:       "Hello World",
+					Body:        "This changes things.",
 				},
 				{
-					pullRequest: pullRequest{
-						HeadRefName: "zombiezen/bar",
-						Title:       "Endgame",
-						Body:        "Checkmate!",
-					},
+					HeadRefName: "zombiezen/bar",
+					Title:       "Endgame",
+					Body:        "Checkmate!",
 				},
 			},
 			wantInitialContent: editorPreamble +
@@ -426,7 +376,7 @@ func TestEditPullRequestMessages(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			prs := make([]*plannedPullRequest, len(test.pullRequests))
+			prs := make([]*pullRequest, len(test.pullRequests))
 			for i, pr := range test.pullRequests {
 				prs[i] = new(*pr)
 			}
@@ -448,7 +398,7 @@ func TestEditPullRequestMessages(t *testing.T) {
 				}
 				return
 			}
-			if diff := cmp.Diff(test.want, prs, cmp.AllowUnexported(plannedPullRequest{})); diff != "" {
+			if diff := cmp.Diff(test.want, prs, cmp.AllowUnexported(pullRequest{})); diff != "" {
 				t.Errorf("pull requests (-want +got):\n%s", diff)
 			}
 		})

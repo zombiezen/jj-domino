@@ -266,15 +266,12 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 					log.Errorf(ctx, "%v", err)
 				},
 			}
-			prsToEdit := plan
-			if c.Editor == nil {
+			prsToEdit := make([]*pullRequest, 0, len(plan))
+			for i, pr := range plan {
 				// If the user didn't explicitly request an editor,
 				// only surface the new PRs.
-				prsToEdit = make([]*plannedPullRequest, 0, len(plan))
-				for i, pr := range plan {
-					if isNew[i] {
-						prsToEdit = append(prsToEdit, pr)
-					}
+				if isNew[i] || c.Editor != nil {
+					prsToEdit = append(prsToEdit, &pr.pullRequest)
 				}
 			}
 			editError := editPullRequestMessages(prsToEdit, func(initialContent []byte) ([]byte, error) {
