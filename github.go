@@ -333,10 +333,13 @@ var errPullRequestNotFound = errors.New("pull request not found")
 
 func newGitHubHTTPClient(token string) *http.Client {
 	return &http.Client{
-		Transport: tokenTransport{
-			host:  "api.github.com",
-			token: token,
-			rt:    http.DefaultTransport,
+		Transport: userAgentTransport{
+			userAgent: "https://github.com/zombiezen/jj-domino",
+			rt: tokenTransport{
+				host:  "api.github.com",
+				token: token,
+				rt:    http.DefaultTransport,
+			},
 		},
 	}
 }

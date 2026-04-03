@@ -51,3 +51,30 @@ func (tt tokenTransport) CloseIdleConnections() {
 		cic.CloseIdleConnections()
 	}
 }
+
+// userAgentTransport is an [http.RoundTripper]
+// that adds a User-Agent header to requests.
+type userAgentTransport struct {
+	userAgent string
+	rt        http.RoundTripper
+}
+
+// RoundTrip implements [http.RoundTripper]
+// by adding an User-Agent header if not present.
+func (uat userAgentTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if len(req.Header.Values("User-Agent")) == 0 {
+		req = req.Clone(req.Context())
+		req.Header.Set("User-Agent", uat.userAgent)
+	}
+	return uat.rt.RoundTrip(req)
+}
+
+// CloseIdleConnections calls uat.rt.CloseIdleConnections(), if present.
+func (uat userAgentTransport) CloseIdleConnections() {
+	cic, ok := uat.rt.(interface {
+		CloseIdleConnections()
+	})
+	if ok {
+		cic.CloseIdleConnections()
+	}
+}
