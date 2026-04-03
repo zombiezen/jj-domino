@@ -43,33 +43,6 @@ type localCommitRef struct {
 	commit *jujutsu.Commit
 }
 
-// singleCommitRevset fetches the single commit the revset matches
-// or returns an error if the revset does not match exactly one commit.
-func singleCommitRevset(ctx context.Context, jj *jujutsu.Jujutsu, revset string) (*jujutsu.Commit, error) {
-	var result *jujutsu.Commit
-	multiple := false
-	opts := jujutsu.LogOptions{Revset: revset}
-	err := jj.Log(ctx, opts, func(c *jujutsu.Commit) bool {
-		if result != nil {
-			log.Debugf(ctx, "Found %v and %v for %s", c, result, revset)
-			multiple = true
-			return false
-		}
-		result = c
-		return true
-	})
-	if err != nil {
-		return nil, err
-	}
-	if multiple {
-		return nil, errors.New("multiple found")
-	}
-	if result == nil {
-		return nil, errEmptyRevset
-	}
-	return result, nil
-}
-
 // isNonEmptyRevset reports whether the revset matches at least one commit.
 func isNonEmptyRevset(ctx context.Context, jj *jujutsu.Jujutsu, revset string) (bool, error) {
 	nonEmpty := false
@@ -81,10 +54,6 @@ func isNonEmptyRevset(ctx context.Context, jj *jujutsu.Jujutsu, revset string) (
 	})
 	return nonEmpty, err
 }
-
-// errEmptyRevset is the error returned by [singleCommitRevset]
-// when the revset does not match any commits.
-var errEmptyRevset = errors.New("revset empty")
 
 // jjGitPush runs the `jj git push` command.
 func jjGitPush(ctx context.Context, jj *jujutsu.Jujutsu, w io.Writer, dryRun bool, pushRemoteName string, extraArgs iter.Seq[string]) error {
@@ -159,22 +128,48 @@ func resolveTrunk(settings map[string]jsontext.Value, bookmarks []*jujutsu.Bookm
 	return possible[0].RefSymbol(), nil
 }
 
-// nameForCommit finds a single local bookmark name for the given commit ID
+// bookmarkForCommit finds a single local bookmark for the given commit ID
 // or returns an error if the commit does not resolve to exactly one bookmark.
-func nameForCommit(bookmarks []*jujutsu.Bookmark, id jujutsu.CommitID) (string, error) {
-	var names []string
+// If there are multiple bookmarks that match,
+// then preferredBookmarkNames is used to attempt to select a single one.
+func bookmarkForCommit(bookmarks []*jujutsu.Bookmark, id jujutsu.CommitID, preferredBookmarkNames iter.Seq[string]) (*jujutsu.Bookmark, error) {
+	possible := make([]*jujutsu.Bookmark, 0, len(bookmarks))
 	for _, b := range bookmarks {
 		if target, ok := b.TargetMerge.Resolved(); b.Remote == "" && ok && target.Equal(id) {
-			names = append(names, b.Name)
+			possible = append(possible, b)
 		}
 	}
-	switch len(names) {
+	switch len(possible) {
 	case 0:
-		return "", noBookmarksError{id: id}
+		return nil, noBookmarksError{id: id}
 	case 1:
-		return names[0], nil
+		return possible[0], nil
 	default:
-		return "", fmt.Errorf("commit %v has multiple bookmarks (%s)", id, strings.Join(names, "|"))
+		var selected *jujutsu.Bookmark
+		for preferredName := range preferredBookmarkNames {
+			i := slices.IndexFunc(bookmarks, func(b *jujutsu.Bookmark) bool {
+				return b.Name == preferredName
+			})
+			if i >= 0 {
+				if selected != nil {
+					selected = nil
+					break
+				}
+				selected = bookmarks[i]
+			}
+		}
+		if selected == nil {
+			revset := joinRevsets(func(yield func(string) bool) {
+				for _, b := range possible {
+					if !yield(b.RefSymbol().String()) {
+						return
+					}
+				}
+			})
+			// revset is always parenthesized.
+			return nil, fmt.Errorf("commit %v has multiple bookmarks %s", id, revset)
+		}
+		return selected, nil
 	}
 }
 
