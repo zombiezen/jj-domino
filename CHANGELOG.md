@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.0][] - 2026-04-05
 
+Version 0.2 is the first official release of jj-domino.
+It has undergone testing and feedback from several users,
+and @zombiezen feels confident with the design at this point.
+
 [0.2.0]: https://github.com/zombiezen/jj-domino/releases/tag/v0.2.0
 
 ### Added
@@ -65,7 +69,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.0][] - 2026-03-09
 
 Version 0.1 was the first release announced to early testers.
-This version was tagged retroactively during the [version 0.2 release][0.2.0]
+
+Until version 0.2, jj-domino was "build from HEAD".
+Version 0.1 was tagged retroactively during the [version 0.2 release][0.2.0]
 so that the release notes could cover the changes made since then.
 
 [0.1.0]: https://github.com/zombiezen/jj-domino/releases/tag/v0.1.0
