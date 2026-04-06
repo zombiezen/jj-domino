@@ -33,6 +33,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 
@@ -44,6 +45,9 @@ import (
 	"zombiezen.com/go/xdgdir"
 )
 
+// jjDominoVersion is the version string filled in by the linker (e.g. "1.2.3").
+var jjDominoVersion string
+
 type cli struct {
 	stdin    io.Reader         `kong:"-"`
 	environ  map[string]string `kong:"-"`
@@ -51,8 +55,9 @@ type cli struct {
 
 	Debug bool `kong:"help=Show debug logs"`
 
-	Submit submitCmd `kong:"cmd,default=withargs,help=Submit a review stack"`
-	Auth   authCmd   `kong:"cmd,help=Manage credentials"`
+	Submit  submitCmd        `kong:"cmd,default=withargs,help=Submit a review stack"`
+	Auth    authCmd          `kong:"cmd,help=Manage credentials"`
+	Version kong.VersionFlag `kong:"help=Show version information."`
 }
 
 func (c *cli) newJujutsu() (*jujutsu.Jujutsu, error) {
@@ -74,7 +79,18 @@ func main() {
 		environ:  environMap(),
 		lookPath: exec.LookPath,
 	}
-	k := kong.Must(c, kong.UsageOnError())
+	version := jjDominoVersion
+	if version == "" {
+		if info, ok := debug.ReadBuildInfo(); !ok {
+			version = "(devel)"
+		} else {
+			version = strings.TrimPrefix(info.Main.Version, "v")
+		}
+	}
+	k := kong.Must(c,
+		kong.Name("jj-domino"),
+		kong.Vars{"version": "jj-domino " + version},
+	)
 
 	var logger log.Logger = &logger{
 		out:   os.Stderr,

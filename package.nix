@@ -55,7 +55,7 @@ in
 
     subPackages = ["."];
     goSum = builtins.readFile ./go.sum;
-    ldflags = ["-s" "-w"];
+    ldflags = ["-s" "-w" "-X=main.jjDominoVersion=${version}"];
 
     meta = {
       description = "Pull request stack manager for Jujutsu";
