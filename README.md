@@ -34,7 +34,7 @@ For example, \#1235 in the demo above would include a note like this:
 > **How to Review**
 >
 > This pull request is a draft because it is intended to be merged after \#1234.
-> The new changes are in the <span style="color:rgb(68,147,248);text-decoration:underline">last commit</span>.
+> The new changes are in the <span style="color:rgb(68,147,248)">last commit</span>.
 >
 > **Related Pull Requests**
 >
