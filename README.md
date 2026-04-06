@@ -21,8 +21,27 @@ Changes to push to origin:
   Add bookmark push-vkoqnzswumlq to fd73fcd14312
 
 #1234: Add foo.txt [main ← push-vkoqnzswumlq] (new)
-#1235: [DRAFT] Add bar.txt [push-vkoqnzswumlq ← push-lvlupwyrvtrq] (new)
+#1235: [DRAFT] Add bar.txt [main ← push-lvlupwyrvtrq] (new)
 ```
+
+jj-domino keeps stacked pull requests as drafts,
+since they include all the commits up to the pull request's bookmark.
+To simplify review,
+jj-domino adds a link in each stacked pull request's description
+to view the changes from the commits unique to the stacked pull request.
+For example, \#1235 in the demo above would include a note like this:
+
+> **How to Review**
+>
+> This pull request is a draft because it is intended to be merged after \#1234.
+> The new changes are in the [last commit](#).
+>
+> **Related Pull Requests**
+>
+> This pull request is part of a stack managed by jj-domino:
+>
+> 1. \#1234
+> 2. → this pull request ←
 
 [Jujutsu]: https://www.jj-vcs.dev/
 [stacking workflow]: https://www.stacking.dev/
@@ -34,10 +53,8 @@ Assuming you already have [Jujutsu][] installed:
 1. [Install Go](https://go.dev/dl/)
 2. `go install zombiezen.com/go/jj-domino@latest`
 3. Authenticate to GitHub using one of two options:
+   - Run `jj-domino auth github-login`.
    - If you're already using the [GitHub CLI][], then run `gh auth login`.
-   - Otherwise, [create a personal access token with `repo` scope](https://github.com/settings/tokens/new?scopes=repo)
-     and store it in the environment variable `GITHUB_TOKEN`
-     or the file `$XDG_CONFIG_DIRS/jj-domino/github-token`.
 
 [GitHub CLI]: https://cli.github.com/
 
