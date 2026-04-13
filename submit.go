@@ -53,6 +53,7 @@ type submitCmd struct {
 	Remote    string   `kong:"help=The remote to push to.,placeholder=REMOTE"`
 	Base      string   `kong:"help=Base remote bookmark to open pull requests against. (Default: trunk()),placeholder=BOOKMARK@REMOTE"`
 	Push      bool     `kong:"negatable,help=Push commits to GitHub. (On by default.),default=true"`
+	RealStack bool     `kong:"help=Base pull requests off other pull requests. Only works when pull requests don\\'t have multiple bases and not in a fork."`
 }
 
 func (c *submitCmd) Validate() error {
@@ -133,6 +134,18 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 		return err
 	}
 
+	if c.RealStack {
+		var stackError error
+		for diff := range graph.walk() {
+			if len(diff.parents) > 1 {
+				stackError = errors.Join(stackError, fmt.Errorf("cannot use --real-stack: %s has multiple bases", diff.name))
+			}
+		}
+		if stackError != nil {
+			return stackError
+		}
+	}
+
 	gitRoot, err := jj.GitRoot(ctx)
 	if err != nil {
 		return err
@@ -165,6 +178,9 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 	if err != nil {
 		return fmt.Errorf("push remote: %v", err)
 	}
+	if c.RealStack && baseRepoPath != headRepoPath {
+		return fmt.Errorf("cannot use --real-stack: must push to %v instead of %v", baseRepoPath, headRepoPath)
+	}
 	templateRevision := "latest(" + joinRevsets(func(yield func(string) bool) {
 		for head := range graph.heads() {
 			if !yield(head.commit.ID.String()) {
@@ -186,11 +202,9 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 		sb := new(strings.Builder)
 		headRepo := placeholderGitHubRepository(headRepoPath)
 		for diff := range graph.walk() {
-			pr := pullRequestFromStackedDiff(githubv4.String(baseRef.Name), headRepo, diff)
-			if slices.Contains(graph.roots, diff) {
-				pr.IsDraft = githubv4.Boolean(c.Draft)
-			}
-			writeLogLine(sb, pr, logLineOptions{
+			diff.pullRequest = pullRequestFromStackedDiff(githubv4.String(baseRef.Name), headRepo, diff)
+			c.alignPullRequest(baseRef.Name, diff)
+			writeLogLine(sb, diff.pullRequest, logLineOptions{
 				baseRepositoryPath: baseRepoPath,
 				prNumberWidth:      defaultPRNumberWidth,
 			})
@@ -235,17 +249,14 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 			}
 			log.Debugf(ctx, "Will create new pull request for %s", diff.name)
 		} else {
-			existingPR.Body = githubv4.String(trimStackFooter(string(existingPR.Body)))
 			diff.pullRequest = existingPR
 			log.Debugf(ctx, "Will reuse pull request %v#%d for %s",
 				baseRepo.path(), existingPR.Number, diff.name)
 		}
+		c.alignPullRequest(baseRef.Name, diff)
 	}
 	if planError != nil {
 		return planError
-	}
-	for diff := range graph.walk() {
-		diff.pullRequest.IsDraft = githubv4.Boolean(c.Draft || len(diff.parents) > 0)
 	}
 
 	// Edit pull request titles/bodies.
@@ -366,7 +377,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 	for diff := range graph.walk() {
 		bodyBuilder := new(strings.Builder)
 		bodyBuilder.WriteString(strings.TrimRight(string(diff.pullRequest.Body), "\n"))
-		writeStackFooter(bodyBuilder, diff)
+		writeStackFooter(bodyBuilder, diff, !c.RealStack)
 		diff.pullRequest.Body = githubv4.String(bodyBuilder.String())
 
 		if err := updatePullRequest(ctx, gitHubClient, baseRepoPath, diff.pullRequest); err != nil {
@@ -471,6 +482,19 @@ func (c *submitCmd) pushChanges(ctx context.Context, jj *jujutsu.Jujutsu, baseRe
 	return nil
 }
 
+// alignPullRequest modifies the fields in diff.pullRequest
+// to conform with jj-domino's plan for the pull request.
+// This trims any stack footer present in the pull request body.
+func (c *submitCmd) alignPullRequest(baseRefName string, diff *stackedDiff) {
+	diff.pullRequest.IsDraft = githubv4.Boolean(c.Draft || (len(diff.parents) > 0 && !c.RealStack))
+	if c.RealStack && len(diff.parents) == 1 {
+		diff.pullRequest.BaseRefName = githubv4.String(diff.parents[0].name)
+	} else {
+		diff.pullRequest.BaseRefName = githubv4.String(baseRefName)
+	}
+	diff.pullRequest.Body = githubv4.String(trimStackFooter(string(diff.pullRequest.Body)))
+}
+
 func pullRequestFromStackedDiff(baseRefName githubv4.String, headRepository *gitHubRepository, diff *stackedDiff) *pullRequest {
 	title, body := inferPullRequestMessage(func(yield func(string) bool) {
 		for c := range diff.commitsBackward() {
@@ -562,13 +586,15 @@ const (
 // intended for the body of diff
 // with a link to display the unique delta
 // and links to the other pull requests in the stack.
-func writeStackFooter(sb *strings.Builder, diff *stackedDiff) {
+func writeStackFooter(sb *strings.Builder, diff *stackedDiff, includeChangesSection bool) {
 	if len(diff.children) == 0 && len(diff.parents) == 0 {
 		return
 	}
 
 	sb.WriteString(stackFooterPreamble)
-	writeStackFooterChanges(sb, diff)
+	if includeChangesSection {
+		writeStackFooterChanges(sb, diff)
+	}
 	sb.WriteString(stackFooterRelatedSectionIntro)
 
 	if len(diff.parents) > 1 {

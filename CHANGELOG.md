@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [Unreleased]: https://github.com/zombiezen/jj-domino/compare/v0.2.0...main
 
+## [Unreleased][]
+
+### Added
+
+- A new `jj-domino submit --real-stack` flag switches behavior
+  to be similar to Version 0.1.
+  Instead of adding a note in the pull request description with the diff,
+  `jj-domino submit --real-stack` will set the base ref of the pull request
+  to the pull request it depends on.
+  This should make the pull requests compatible with
+  the new [GitHub Stacked PRs feature](https://github.github.com/gh-stack/).
+  This functionality is opt-in,
+  since it is more restrictive than the default behavior.
+
 ## [0.2.0][] - 2026-04-05
 
 Version 0.2 is the first official release of jj-domino.
