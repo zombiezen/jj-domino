@@ -648,7 +648,7 @@ func TestWriteStackFooter(t *testing.T) {
 					continue
 				}
 				sb := new(strings.Builder)
-				writeStackFooter(sb, sd)
+				writeStackFooter(sb, sd, true)
 				got := sb.String()
 				if diff := cmp.Diff(want, got); diff != "" {
 					t.Errorf("footer for %s (-want +got):\n%s", name, diff)
