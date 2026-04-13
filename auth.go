@@ -44,8 +44,8 @@ import (
 )
 
 type authCmd struct {
-	GitHubLogin authGitHubLoginCmd `kong:"cmd,name=github-login,help=Writes GitHub token to configuration file"`
-	Status      authStatusCmd      `kong:"cmd,help=Display the authentication status"`
+	GitHubLogin authGitHubLoginCmd `kong:"cmd,name=github-login,help=Writes GitHub token to configuration file."`
+	Status      authStatusCmd      `kong:"cmd,help=Display the authentication status."`
 }
 
 type authStatusCmd struct{}
@@ -69,8 +69,8 @@ func (c *authStatusCmd) Run(ctx context.Context, k *kong.Kong, global *cli) erro
 }
 
 type authGitHubLoginCmd struct {
-	Quiet  bool `kong:"short=q,help=Don\\'t print out prompt"`
-	Verify bool `kong:"negatable,default=true,help=Verify token before saving (default ${default})"`
+	Quiet  bool `kong:"short=q,help=Don\\'t print out prompt."`
+	Verify bool `kong:"negatable,default=true,help=Verify token before saving. (Default ${default}.)"`
 }
 
 func (c *authGitHubLoginCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {

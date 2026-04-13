@@ -53,10 +53,10 @@ type cli struct {
 	environ  map[string]string `kong:"-"`
 	lookPath lookPathFunc      `kong:"-"`
 
-	Debug bool `kong:"help=Show debug logs"`
+	Debug bool `kong:"help=Show debug logs."`
 
-	Submit  submitCmd        `kong:"cmd,default=withargs,help=Submit a review stack"`
-	Auth    authCmd          `kong:"cmd,help=Manage credentials"`
+	Submit  submitCmd        `kong:"cmd,default=withargs,help=Submit a review stack."`
+	Auth    authCmd          `kong:"cmd,help=Manage credentials."`
 	Version kong.VersionFlag `kong:"help=Show version information."`
 }
 

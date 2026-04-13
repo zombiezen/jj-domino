@@ -44,15 +44,15 @@ import (
 )
 
 type submitCmd struct {
-	Bookmarks []string `kong:"name=bookmark,short=b,help=Push a stack with the bookmark as the head,placeholder=NAME,xor=revisions"`
-	Revisions []string `kong:"short=r,sep=none,help=Push stacks pointing to these commits (can be repeated) (default: trunk()..@),placeholder=REVSETS,xor=revisions"`
-	Changes   []string `kong:"name=change,short=c,sep=none,help=Push stacks by creating bookmarks (can be repeated),placeholder=REVSETS,xor=revisions"`
-	Editor    *bool    `kong:"negatable,help=Whether to open an editor on the pull request descriptions (defaults to only new PRs)"`
-	Draft     bool     `kong:"short=d,help=Mark first pull request in stack as draft"`
-	DryRun    bool     `kong:"short=n,help=Don\\'t send to GitHub"`
-	Remote    string   `kong:"help=The remote to push to,placeholder=REMOTE"`
-	Base      string   `kong:"help=Base remote bookmark to open pull requests against (default: trunk()),placeholder=BOOKMARK@REMOTE"`
-	Push      bool     `kong:"negatable,help=Push commits to GitHub (on by default),default=true"`
+	Bookmarks []string `kong:"name=bookmark,short=b,help=Push a stack with the bookmark as the head.,placeholder=NAME,xor=revisions"`
+	Revisions []string `kong:"short=r,sep=none,help=Push stacks pointing to these commits. (Can be repeated.) (Default: trunk()..@),placeholder=REVSETS,xor=revisions"`
+	Changes   []string `kong:"name=change,short=c,sep=none,help=Push stacks by creating bookmarks. (Can be repeated.),placeholder=REVSETS,xor=revisions"`
+	Editor    *bool    `kong:"negatable,help=Whether to open an editor on the pull request descriptions. (Defaults to only new PRs.)"`
+	Draft     bool     `kong:"short=d,help=Mark first pull request in stack as draft."`
+	DryRun    bool     `kong:"short=n,help=Don\\'t send to GitHub."`
+	Remote    string   `kong:"help=The remote to push to.,placeholder=REMOTE"`
+	Base      string   `kong:"help=Base remote bookmark to open pull requests against. (Default: trunk()),placeholder=BOOKMARK@REMOTE"`
+	Push      bool     `kong:"negatable,help=Push commits to GitHub. (On by default.),default=true"`
 }
 
 func (c *submitCmd) Validate() error {
