@@ -139,6 +139,9 @@ func FetchRepository(ctx context.Context, client *githubv4.Client, path Reposito
 	if err != nil {
 		return nil, fmt.Errorf("get %v: %v", path, err)
 	}
+	if query.Repository == nil {
+		return nil, fmt.Errorf("get %v: not found", path)
+	}
 	return query.Repository, nil
 }
 
