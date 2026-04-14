@@ -30,6 +30,7 @@ import (
 	"io"
 	"iter"
 	"maps"
+	"net/http"
 	"os"
 	"slices"
 	"strconv"
@@ -39,6 +40,7 @@ import (
 	"github.com/alecthomas/kong"
 	jsonv2 "github.com/go-json-experiment/json"
 	"github.com/shurcooL/githubv4"
+	"zombiezen.com/go/jj-domino/internal/github"
 	"zombiezen.com/go/jj-domino/internal/jujutsu"
 	"zombiezen.com/go/log"
 )
@@ -152,7 +154,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 		return fmt.Errorf("unknown remote %s from base", baseRef.Remote)
 	}
 	log.Debugf(ctx, "remote.%s.url = %s", baseRef.Remote, baseRemote.FetchURL)
-	baseRepoPath, err := gitHubRepositoryForURL(baseRemote.FetchURL)
+	baseRepoPath, err := github.RepositoryPathForURL(baseRemote.FetchURL)
 	if err != nil {
 		return fmt.Errorf("base remote: %v", err)
 	}
@@ -161,7 +163,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 		return fmt.Errorf("unknown remote %s from git.push", pushRemoteName)
 	}
 	log.Debugf(ctx, "remote.%s.pushurl = %s", pushRemoteName, pushRemote.PushURL)
-	headRepoPath, err := gitHubRepositoryForURL(pushRemote.PushURL)
+	headRepoPath, err := github.RepositoryPathForURL(pushRemote.PushURL)
 	if err != nil {
 		return fmt.Errorf("push remote: %v", err)
 	}
@@ -172,7 +174,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 			}
 		}
 	}) + ")"
-	pullRequestTemplate := readGitHubPullRequestTemplate(ctx, jj, templateRevision)
+	pullRequestTemplate := github.ReadPullRequestTemplate(ctx, jj, templateRevision)
 
 	token, err := gitHubToken(ctx, global.environ, global.lookPath)
 	if err != nil {
@@ -184,7 +186,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 		log.Warnf(ctx, "Unable to authenticate to GitHub: %v", err)
 
 		sb := new(strings.Builder)
-		headRepo := placeholderGitHubRepository(headRepoPath)
+		headRepo := github.PlaceholderRepository(headRepoPath)
 		for diff := range graph.walk() {
 			pr := pullRequestFromStackedDiff(githubv4.String(baseRef.Name), headRepo, diff)
 			if slices.Contains(graph.roots, diff) {
@@ -200,14 +202,14 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 		return nil
 	}
 
-	httpClient := newGitHubHTTPClient(token)
+	httpClient := github.NewHTTPClient(token, http.DefaultTransport)
 	defer httpClient.CloseIdleConnections()
 	gitHubClient := githubv4.NewClient(httpClient)
 
-	headRepo := placeholderGitHubRepository(headRepoPath)
+	headRepo := github.PlaceholderRepository(headRepoPath)
 	var planError error
 	if !c.DryRun {
-		newHeadRepo, err := fetchRepository(ctx, gitHubClient, headRepoPath)
+		newHeadRepo, err := github.FetchRepository(ctx, gitHubClient, headRepoPath)
 		if err != nil {
 			// If we fail to fetch the head repository, don't stop immediately.
 			// We need it to create pull requests,
@@ -218,12 +220,12 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 		}
 	}
 
-	var baseRepo *gitHubRepository
+	var baseRepo *github.Repository
 	newDiffs := make(map[*stackedDiff]struct{})
 	for diff := range graph.walk() {
-		newBaseRepo, existingPR, err := findOpenPullRequestForHead(ctx, gitHubClient, baseRepoPath, headRepoPath, diff.name)
+		newBaseRepo, existingPR, err := github.FindOpenPullRequestForHead(ctx, gitHubClient, baseRepoPath, headRepoPath, diff.name)
 		baseRepo = cmp.Or(newBaseRepo, baseRepo)
-		if err != nil && !errors.Is(err, errPullRequestNotFound) {
+		if err != nil && !errors.Is(err, github.ErrPullRequestNotFound) {
 			planError = errors.Join(planError, err)
 			continue
 		}
@@ -238,7 +240,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 			existingPR.Body = githubv4.String(trimStackFooter(string(existingPR.Body)))
 			diff.pullRequest = existingPR
 			log.Debugf(ctx, "Will reuse pull request %v#%d for %s",
-				baseRepo.path(), existingPR.Number, diff.name)
+				baseRepo.Path(), existingPR.Number, diff.name)
 		}
 	}
 	if planError != nil {
@@ -275,7 +277,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 					log.Errorf(ctx, "%v", err)
 				},
 			}
-			var prsToEdit []*pullRequest
+			var prsToEdit []*github.PullRequest
 			for diff := range graph.walk() {
 				// If the user didn't explicitly request an editor,
 				// only surface the new PRs.
@@ -349,7 +351,7 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 			continue
 		}
 
-		if err := createPullRequest(ctx, gitHubClient, baseRepo, diff.pullRequest); err != nil {
+		if err := github.CreatePullRequest(ctx, gitHubClient, baseRepo, diff.pullRequest); err != nil {
 			return err
 		}
 		logOptions.prNumberWidth = max(logOptions.prNumberWidth, maxIntWidth(func(yield func(githubv4.Int) bool) {
@@ -369,11 +371,11 @@ func (c *submitCmd) Run(ctx context.Context, k *kong.Kong, global *cli) error {
 		writeStackFooter(bodyBuilder, diff)
 		diff.pullRequest.Body = githubv4.String(bodyBuilder.String())
 
-		if err := updatePullRequest(ctx, gitHubClient, baseRepoPath, diff.pullRequest); err != nil {
+		if err := github.UpdatePullRequest(ctx, gitHubClient, baseRepoPath, diff.pullRequest); err != nil {
 			return err
 		}
 		if _, isNew := newDiffs[diff]; !isNew {
-			if err := updatePullRequestDraftStatus(ctx, gitHubClient, baseRepoPath, diff.pullRequest); err != nil {
+			if err := github.UpdatePullRequestDraftStatus(ctx, gitHubClient, baseRepoPath, diff.pullRequest); err != nil {
 				// Not a fatal error: the pull request still exists.
 				log.Warnf(ctx, "%v", err)
 			}
@@ -471,7 +473,7 @@ func (c *submitCmd) pushChanges(ctx context.Context, jj *jujutsu.Jujutsu, baseRe
 	return nil
 }
 
-func pullRequestFromStackedDiff(baseRefName githubv4.String, headRepository *gitHubRepository, diff *stackedDiff) *pullRequest {
+func pullRequestFromStackedDiff(baseRefName githubv4.String, headRepository *github.Repository, diff *stackedDiff) *github.PullRequest {
 	title, body := inferPullRequestMessage(func(yield func(string) bool) {
 		for c := range diff.commitsBackward() {
 			if !yield(c.Description) {
@@ -479,7 +481,7 @@ func pullRequestFromStackedDiff(baseRefName githubv4.String, headRepository *git
 			}
 		}
 	})
-	return &pullRequest{
+	return &github.PullRequest{
 		BaseRefName:    baseRefName,
 		HeadRepository: headRepository,
 		HeadRefName:    githubv4.String(diff.name),
@@ -491,12 +493,12 @@ func pullRequestFromStackedDiff(baseRefName githubv4.String, headRepository *git
 }
 
 type logLineOptions struct {
-	baseRepositoryPath gitHubRepositoryPath
+	baseRepositoryPath github.RepositoryPath
 	prNumberWidth      int
 	link               bool
 }
 
-func writeLogLine(sb *strings.Builder, pr *pullRequest, opts logLineOptions) {
+func writeLogLine(sb *strings.Builder, pr *github.PullRequest, opts logLineOptions) {
 	wroteLink := false
 	if pr.ID == nil {
 		sb.WriteString(prNumberPlaceholder(opts.prNumberWidth))
@@ -524,7 +526,7 @@ func writeLogLine(sb *strings.Builder, pr *pullRequest, opts logLineOptions) {
 	}
 
 	sb.WriteString(" [")
-	if pr.HeadRepository.path() == opts.baseRepositoryPath {
+	if pr.HeadRepository.Path() == opts.baseRepositoryPath {
 		sb.WriteString(string(pr.BaseRefName))
 		sb.WriteString(" ← ")
 		sb.WriteString(string(pr.HeadRefName))
@@ -572,7 +574,7 @@ func writeStackFooter(sb *strings.Builder, diff *stackedDiff) {
 	sb.WriteString(stackFooterRelatedSectionIntro)
 
 	if len(diff.parents) > 1 {
-		writeStackFooterList(sb, stackFooterParentsIntro, func(yield func(*pullRequest) bool) {
+		writeStackFooterList(sb, stackFooterParentsIntro, func(yield func(*github.PullRequest) bool) {
 			for _, parent := range diff.parents {
 				if !yield(parent.pullRequest) {
 					return
@@ -678,13 +680,13 @@ func writeStackFooterChanges(sb *strings.Builder, diff *stackedDiff) {
 	fmt.Fprintf(sb, stackFooterChangesSection,
 		parentsString,
 		commitsPhrase,
-		diff.pullRequest.changesURL(diff.root().ID, diff.commit.ID),
+		diff.pullRequest.ChangesURL(diff.root().ID, diff.commit.ID),
 	)
 }
 
 // writeStackFooterChildren writes the list of immediate child pull requests of diff to sb.
 func writeStackFooterChildren(sb *strings.Builder, diff *stackedDiff) {
-	writeStackFooterList(sb, stackFooterChildrenIntro, func(yield func(*pullRequest) bool) {
+	writeStackFooterList(sb, stackFooterChildrenIntro, func(yield func(*github.PullRequest) bool) {
 		for _, child := range diff.children {
 			if !yield(child.pullRequest) {
 				return
@@ -696,7 +698,7 @@ func writeStackFooterChildren(sb *strings.Builder, diff *stackedDiff) {
 // writeStackFooterList writes a unordered list of links to pull requests
 // with an introduction to sb.
 // If prs is empty, then nothing is written.
-func writeStackFooterList(sb *strings.Builder, intro string, prs iter.Seq[*pullRequest]) {
+func writeStackFooterList(sb *strings.Builder, intro string, prs iter.Seq[*github.PullRequest]) {
 	nextPR, stop := iter.Pull(prs)
 	defer stop()
 

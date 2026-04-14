@@ -31,6 +31,7 @@ import (
 	"strings"
 
 	"zombiezen.com/go/jj-domino/internal/commitgraph"
+	"zombiezen.com/go/jj-domino/internal/github"
 	"zombiezen.com/go/jj-domino/internal/jujutsu"
 )
 
@@ -66,7 +67,7 @@ type stackedDiff struct {
 	// Parents appear before children.
 	uniqueAncestors []*jujutsu.Commit
 
-	pullRequest *pullRequest
+	pullRequest *github.PullRequest
 
 	parents  []*stackedDiff
 	children []*stackedDiff

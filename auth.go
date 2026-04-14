@@ -28,6 +28,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -38,6 +39,7 @@ import (
 	"github.com/shurcooL/githubv4"
 	"golang.org/x/term"
 	"zombiezen.com/go/jj-domino/internal/cmderror"
+	"zombiezen.com/go/jj-domino/internal/github"
 	"zombiezen.com/go/jj-domino/internal/sigterm"
 	"zombiezen.com/go/log"
 	"zombiezen.com/go/xdgdir"
@@ -55,11 +57,11 @@ func (c *authStatusCmd) Run(ctx context.Context, k *kong.Kong, global *cli) erro
 	if err != nil {
 		return err
 	}
-	httpClient := newGitHubHTTPClient(token)
+	httpClient := github.NewHTTPClient(token, http.DefaultTransport)
 	defer httpClient.CloseIdleConnections()
 	client := githubv4.NewClient(httpClient)
 
-	username, err := gitHubAuthenticatedUser(ctx, client)
+	username, err := github.AuthenticatedUser(ctx, client)
 	if err != nil {
 		return err
 	}
@@ -126,10 +128,10 @@ func (c *authGitHubLoginCmd) Run(ctx context.Context, k *kong.Kong, global *cli)
 	}
 
 	if c.Verify {
-		httpClient := newGitHubHTTPClient(string(token))
+		httpClient := github.NewHTTPClient(string(token), http.DefaultTransport)
 		defer httpClient.CloseIdleConnections()
 		client := githubv4.NewClient(httpClient)
-		username, err := gitHubAuthenticatedUser(ctx, client)
+		username, err := github.AuthenticatedUser(ctx, client)
 		if err != nil {
 			return err
 		}

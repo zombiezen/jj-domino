@@ -34,22 +34,23 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"zombiezen.com/go/jj-domino/internal/github"
 	"zombiezen.com/go/jj-domino/internal/jujutsu"
 )
 
 func TestEditPullRequestMessages(t *testing.T) {
 	tests := []struct {
 		name          string
-		pullRequests  []*pullRequest
+		pullRequests  []*github.PullRequest
 		editedContent string
 
-		want               []*pullRequest
+		want               []*github.PullRequest
 		wantInitialContent string
 		err                bool
 	}{
 		{
 			name: "SinglePullRequest",
-			pullRequests: []*pullRequest{
+			pullRequests: []*github.PullRequest{
 				{
 					HeadRefName: "zombiezen/foo",
 					Title:       "Hello World",
@@ -64,7 +65,7 @@ func TestEditPullRequestMessages(t *testing.T) {
 				"Hello Universe\n\n" +
 				"This changes *EVERYTHING*.\n" +
 				editorPostscript,
-			want: []*pullRequest{
+			want: []*github.PullRequest{
 				{
 					HeadRefName: "zombiezen/foo",
 					Title:       "Hello Universe",
@@ -74,7 +75,7 @@ func TestEditPullRequestMessages(t *testing.T) {
 		},
 		{
 			name: "CommentsInBody",
-			pullRequests: []*pullRequest{
+			pullRequests: []*github.PullRequest{
 				{
 					HeadRefName: "zombiezen/foo",
 					Title:       "Hello World",
@@ -91,7 +92,7 @@ func TestEditPullRequestMessages(t *testing.T) {
 				editorCommentPrefix + " Some choice commentary here.\n" +
 				"I can't believe it.\n" +
 				editorPostscript,
-			want: []*pullRequest{
+			want: []*github.PullRequest{
 				{
 					HeadRefName: "zombiezen/foo",
 					Title:       "Hello Universe",
@@ -101,7 +102,7 @@ func TestEditPullRequestMessages(t *testing.T) {
 		},
 		{
 			name: "TrailingNewlinesInBody",
-			pullRequests: []*pullRequest{
+			pullRequests: []*github.PullRequest{
 				{
 					HeadRefName: "zombiezen/foo",
 					Title:       "Hello World",
@@ -116,7 +117,7 @@ func TestEditPullRequestMessages(t *testing.T) {
 				"Hello Universe\n\n" +
 				"This changes *EVERYTHING*.\n" +
 				editorPostscript,
-			want: []*pullRequest{
+			want: []*github.PullRequest{
 				{
 					HeadRefName: "zombiezen/foo",
 					Title:       "Hello Universe",
@@ -126,7 +127,7 @@ func TestEditPullRequestMessages(t *testing.T) {
 		},
 		{
 			name: "MissingMessage",
-			pullRequests: []*pullRequest{
+			pullRequests: []*github.PullRequest{
 				{
 					HeadRefName: "zombiezen/foo",
 					Title:       "Hello World",
@@ -144,7 +145,7 @@ func TestEditPullRequestMessages(t *testing.T) {
 		},
 		{
 			name: "RemoveBody",
-			pullRequests: []*pullRequest{
+			pullRequests: []*github.PullRequest{
 				{
 					HeadRefName: "zombiezen/foo",
 					Title:       "Hello World",
@@ -158,7 +159,7 @@ func TestEditPullRequestMessages(t *testing.T) {
 			editedContent: "" +
 				"Hello Nothing\n\n" +
 				editorPostscript,
-			want: []*pullRequest{
+			want: []*github.PullRequest{
 				{
 					HeadRefName: "zombiezen/foo",
 					Title:       "Hello Nothing",
@@ -168,7 +169,7 @@ func TestEditPullRequestMessages(t *testing.T) {
 		},
 		{
 			name: "AddBody",
-			pullRequests: []*pullRequest{
+			pullRequests: []*github.PullRequest{
 				{
 					HeadRefName: "zombiezen/foo",
 					Title:       "Hello World",
@@ -181,7 +182,7 @@ func TestEditPullRequestMessages(t *testing.T) {
 				"Hello new body\n\n" +
 				"wo\n" +
 				editorPostscript,
-			want: []*pullRequest{
+			want: []*github.PullRequest{
 				{
 					HeadRefName: "zombiezen/foo",
 					Title:       "Hello new body",
@@ -191,7 +192,7 @@ func TestEditPullRequestMessages(t *testing.T) {
 		},
 		{
 			name: "MultiplePullRequests",
-			pullRequests: []*pullRequest{
+			pullRequests: []*github.PullRequest{
 				{
 					HeadRefName: "zombiezen/foo",
 					Title:       "Hello World",
@@ -219,7 +220,7 @@ func TestEditPullRequestMessages(t *testing.T) {
 				"Close to Endgame\n\n" +
 				"Check\n\n" +
 				editorPostscript,
-			want: []*pullRequest{
+			want: []*github.PullRequest{
 				{
 					HeadRefName: "zombiezen/foo",
 					Title:       "Hello Universe",
@@ -234,7 +235,7 @@ func TestEditPullRequestMessages(t *testing.T) {
 		},
 		{
 			name: "MultiplePullRequestsReordered",
-			pullRequests: []*pullRequest{
+			pullRequests: []*github.PullRequest{
 				{
 					HeadRefName: "zombiezen/foo",
 					Title:       "Hello World",
@@ -262,7 +263,7 @@ func TestEditPullRequestMessages(t *testing.T) {
 				"Hello Universe\n\n" +
 				"This changes *EVERYTHING*.\n" +
 				editorPostscript,
-			want: []*pullRequest{
+			want: []*github.PullRequest{
 				{
 					HeadRefName: "zombiezen/foo",
 					Title:       "Hello Universe",
@@ -277,7 +278,7 @@ func TestEditPullRequestMessages(t *testing.T) {
 		},
 		{
 			name: "DuplicateMarkers",
-			pullRequests: []*pullRequest{
+			pullRequests: []*github.PullRequest{
 				{
 					HeadRefName: "zombiezen/foo",
 					Title:       "Hello World",
@@ -311,7 +312,7 @@ func TestEditPullRequestMessages(t *testing.T) {
 		},
 		{
 			name: "ExtraMarker",
-			pullRequests: []*pullRequest{
+			pullRequests: []*github.PullRequest{
 				{
 					HeadRefName: "zombiezen/foo",
 					Title:       "Hello World",
@@ -345,7 +346,7 @@ func TestEditPullRequestMessages(t *testing.T) {
 		},
 		{
 			name: "MissingMarker",
-			pullRequests: []*pullRequest{
+			pullRequests: []*github.PullRequest{
 				{
 					HeadRefName: "zombiezen/foo",
 					Title:       "Hello World",
@@ -376,7 +377,7 @@ func TestEditPullRequestMessages(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			prs := make([]*pullRequest, len(test.pullRequests))
+			prs := make([]*github.PullRequest, len(test.pullRequests))
 			for i, pr := range test.pullRequests {
 				prs[i] = new(*pr)
 			}
@@ -398,7 +399,7 @@ func TestEditPullRequestMessages(t *testing.T) {
 				}
 				return
 			}
-			if diff := cmp.Diff(test.want, prs, cmp.AllowUnexported(pullRequest{})); diff != "" {
+			if diff := cmp.Diff(test.want, prs); diff != "" {
 				t.Errorf("pull requests (-want +got):\n%s", diff)
 			}
 		})

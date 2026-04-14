@@ -38,6 +38,7 @@ import (
 	jsonv2 "github.com/go-json-experiment/json"
 	"github.com/go-json-experiment/json/jsontext"
 	"github.com/shurcooL/githubv4"
+	"zombiezen.com/go/jj-domino/internal/github"
 	"zombiezen.com/go/jj-domino/internal/jujutsu"
 	"zombiezen.com/go/jj-domino/internal/sigterm"
 )
@@ -56,7 +57,7 @@ const (
 		editorCommentPrefix + " Lines starting with `" + editorCommentPrefix + "` (like this one) will be removed.\n"
 )
 
-func editPullRequestMessages(prs []*pullRequest, edit func(initialContent []byte) ([]byte, error)) (err error) {
+func editPullRequestMessages(prs []*github.PullRequest, edit func(initialContent []byte) ([]byte, error)) (err error) {
 	if len(prs) == 0 {
 		return errors.New("edit pull request messages: no pull requests to edit")
 	}
@@ -98,7 +99,7 @@ func editPullRequestMessages(prs []*pullRequest, edit func(initialContent []byte
 	return nil
 }
 
-func parseSinglePREditor(pr *pullRequest, editorContent []byte) (err error) {
+func parseSinglePREditor(pr *github.PullRequest, editorContent []byte) (err error) {
 	defer func() {
 		if err != nil {
 			err = &editorParseError{
@@ -160,7 +161,7 @@ func parseSinglePREditor(pr *pullRequest, editorContent []byte) (err error) {
 	return nil
 }
 
-func parseMultiPREditor(prs []*pullRequest, editorContent []byte) (err error) {
+func parseMultiPREditor(prs []*github.PullRequest, editorContent []byte) (err error) {
 	defer func() {
 		if err != nil {
 			err = &editorParseError{
@@ -198,7 +199,7 @@ func parseMultiPREditor(prs []*pullRequest, editorContent []byte) (err error) {
 	// Read pull request content.
 	found := make([]bool, len(prs))
 	for headRefName != "" {
-		i := slices.IndexFunc(prs, func(pr *pullRequest) bool {
+		i := slices.IndexFunc(prs, func(pr *github.PullRequest) bool {
 			return pr.HeadRefName == githubv4.String(headRefName)
 		})
 		if i == -1 {

@@ -20,7 +20,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-package main
+package github
 
 import (
 	"net/url"
@@ -74,8 +74,8 @@ func TestPullRequestChangesURL(t *testing.T) {
 			continue
 		}
 
-		pr := &pullRequest{URL: githubv4.URI{URL: u}}
-		if got := pr.changesURL(test.from, test.to).String(); got != test.want {
+		pr := &PullRequest{URL: githubv4.URI{URL: u}}
+		if got := pr.ChangesURL(test.from, test.to).String(); got != test.want {
 			t.Errorf("(&pullRequest{URL: %s}).changesURL(%v, %v) = %s; want %s",
 				test.pullRequestURL, test.from, test.to, got, test.want)
 		}

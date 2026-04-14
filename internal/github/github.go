@@ -20,7 +20,9 @@
 //
 // SPDX-License-Identifier: MIT
 
-package main
+// Package github provides high-level data types and operations for GitHub
+// that pertain to jj-domino.
+package github
 
 import (
 	"context"
@@ -38,35 +40,38 @@ import (
 	"zombiezen.com/go/log"
 )
 
-type gitHubRepositoryPath struct {
+// A RepositoryPath is a reference to a [Repository].
+type RepositoryPath struct {
 	Owner string
 	Repo  string
 }
 
-func gitHubRepositoryForURL(urlstr string) (gitHubRepositoryPath, error) {
+// RepositoryPathForURL extracts the [RepositoryPath] from a Git-style URL.
+func RepositoryPathForURL(urlstr string) (RepositoryPath, error) {
 	u, err := git.ParseURL(urlstr)
 	if err != nil {
-		return gitHubRepositoryPath{}, err
+		return RepositoryPath{}, err
 	}
 	if u.Host != "github.com" || !(u.Scheme == "https" || u.Scheme == "ssh" && u.User.Username() == "git") {
-		return gitHubRepositoryPath{}, fmt.Errorf("%s is not a GitHub repository", urlstr)
+		return RepositoryPath{}, fmt.Errorf("%s is not a GitHub repository", urlstr)
 	}
-	var p gitHubRepositoryPath
+	var p RepositoryPath
 	var ok bool
 	p.Owner, p.Repo, ok = strings.Cut(strings.TrimPrefix(u.Path, "/"), "/")
 	if !ok || strings.Contains(p.Repo, "/") {
-		return gitHubRepositoryPath{}, fmt.Errorf("%s is not a GitHub repository", urlstr)
+		return RepositoryPath{}, fmt.Errorf("%s is not a GitHub repository", urlstr)
 	}
 	p.Repo = strings.TrimSuffix(p.Repo, ".git")
 	return p, nil
 }
 
-func (path gitHubRepositoryPath) String() string {
+// String returns the URL-encoded path, like "foo%20bar/baz".
+func (path RepositoryPath) String() string {
 	return url.PathEscape(path.Owner) + "/" + url.PathEscape(path.Repo)
 }
 
-// gitHubAuthenticatedUser returns the username associated with the client's authentication token.
-func gitHubAuthenticatedUser(ctx context.Context, client *githubv4.Client) (githubv4.String, error) {
+// AuthenticatedUser returns the username associated with the client's authentication token.
+func AuthenticatedUser(ctx context.Context, client *githubv4.Client) (githubv4.String, error) {
 	var query struct {
 		Viewer struct {
 			Login githubv4.String
@@ -78,7 +83,8 @@ func gitHubAuthenticatedUser(ctx context.Context, client *githubv4.Client) (gith
 	return query.Viewer.Login, nil
 }
 
-type pullRequest struct {
+// PullRequest holds information about a GitHub pull request.
+type PullRequest struct {
 	ID      githubv4.ID
 	Number  githubv4.Int
 	Title   githubv4.String
@@ -87,12 +93,12 @@ type pullRequest struct {
 	URL     githubv4.URI
 
 	BaseRefName    githubv4.String
-	HeadRepository *gitHubRepository
+	HeadRepository *Repository
 	HeadRefName    githubv4.String
 }
 
-// changesURL constructs a URL to the "Files Changed" tab.
-func (pr *pullRequest) changesURL(from, to jujutsu.CommitID) githubv4.URI {
+// ChangesURL constructs a URL to the "Files Changed" tab.
+func (pr *PullRequest) ChangesURL(from, to jujutsu.CommitID) githubv4.URI {
 	switch {
 	case from.IsZero() || to.IsZero():
 		return githubv4.URI{URL: pr.URL.JoinPath("changes")}
@@ -103,23 +109,27 @@ func (pr *pullRequest) changesURL(from, to jujutsu.CommitID) githubv4.URI {
 	}
 }
 
-type gitHubRepository struct {
+// Repository holds information about a GitHub repository.
+type Repository struct {
 	ID    githubv4.ID
 	Name  githubv4.String
-	Owner *gitHubRepositoryOwner
+	Owner *RepositoryOwner
 }
 
-func placeholderGitHubRepository(path gitHubRepositoryPath) *gitHubRepository {
-	return &gitHubRepository{
-		Owner: &gitHubRepositoryOwner{Login: githubv4.String(path.Owner)},
+// PlaceholderRepository returns a [Repository] from the details in a [RepositoryPath].
+// The ID field is left blank.
+func PlaceholderRepository(path RepositoryPath) *Repository {
+	return &Repository{
+		Owner: &RepositoryOwner{Login: githubv4.String(path.Owner)},
 		Name:  githubv4.String(path.Repo),
 	}
 }
 
-func fetchRepository(ctx context.Context, client *githubv4.Client, path gitHubRepositoryPath) (*gitHubRepository, error) {
+// FetchRepository reads information about the repository at the given path.
+func FetchRepository(ctx context.Context, client *githubv4.Client, path RepositoryPath) (*Repository, error) {
 
 	var query struct {
-		Repository *gitHubRepository `graphql:"repository(owner: $owner, name: $name)"`
+		Repository *Repository `graphql:"repository(owner: $owner, name: $name)"`
 	}
 	log.Debugf(ctx, "Getting information about %v...", path)
 	err := client.Query(ctx, &query, map[string]any{
@@ -132,31 +142,39 @@ func fetchRepository(ctx context.Context, client *githubv4.Client, path gitHubRe
 	return query.Repository, nil
 }
 
-func (repo *gitHubRepository) path() gitHubRepositoryPath {
-	p := gitHubRepositoryPath{Repo: string(repo.Name)}
+// Path returns the repository's path.
+func (repo *Repository) Path() RepositoryPath {
+	p := RepositoryPath{Repo: string(repo.Name)}
 	if repo.Owner != nil {
 		p.Owner = string(repo.Owner.Login)
 	}
 	return p
 }
 
-type gitHubRepositoryOwner struct {
+// RepositoryOwner represents entities that can own GitHub repositories
+// (i.e. either a user or an organization).
+type RepositoryOwner struct {
 	Login githubv4.String
 }
 
-func (owner *gitHubRepositoryOwner) String() string {
+// String returns the name of the owner as it appears in URLs.
+func (owner *RepositoryOwner) String() string {
 	if owner == nil {
 		return ""
 	}
 	return string(owner.Login)
 }
 
-type gitHubPageInfo struct {
+type pageInfo struct {
 	EndCursor   githubv4.String
 	HasNextPage githubv4.Boolean
 }
 
-func findOpenPullRequestForHead(ctx context.Context, client *githubv4.Client, baseRepoPath gitHubRepositoryPath, headRepoPath gitHubRepositoryPath, headRef string) (baseRepo *gitHubRepository, result *pullRequest, err error) {
+// FindOpenPullRequestForHead searches for an open pull request
+// in the given base repository that intends to merge the given head ref.
+// If no such pull request exists, then FindOpenPullRequestForHead returns an error
+// that wraps [ErrPullRequestNotFound].
+func FindOpenPullRequestForHead(ctx context.Context, client *githubv4.Client, baseRepoPath RepositoryPath, headRepoPath RepositoryPath, headRef string) (baseRepo *Repository, result *PullRequest, err error) {
 	defer func() {
 		if err != nil {
 			qualifiedHeadRef := headRef
@@ -176,11 +194,11 @@ func findOpenPullRequestForHead(ctx context.Context, client *githubv4.Client, ba
 	for {
 		var query struct {
 			Repository struct {
-				gitHubRepository
+				Repository
 
 				PullRequests struct {
-					Nodes    []*pullRequest
-					PageInfo gitHubPageInfo
+					Nodes    []*PullRequest
+					PageInfo pageInfo
 				} `graphql:"pullRequests(headRefName: $headRef, states: [OPEN], first: 50, after: $cursor)"`
 			} `graphql:"repository(owner: $baseOwner, name: $baseRepo)"`
 		}
@@ -189,10 +207,10 @@ func findOpenPullRequestForHead(ctx context.Context, client *githubv4.Client, ba
 			// Make error opaque.
 			return nil, nil, errors.New(err.Error())
 		}
-		baseRepo = &query.Repository.gitHubRepository
+		baseRepo = &query.Repository.Repository
 
 		for _, pr := range query.Repository.PullRequests.Nodes {
-			if pr.HeadRepository != nil && pr.HeadRepository.path() == headRepoPath {
+			if pr.HeadRepository != nil && pr.HeadRepository.Path() == headRepoPath {
 				if result != nil {
 					return baseRepo, nil, fmt.Errorf("found multiple (#%d and #%d)", result.Number, pr.Number)
 				}
@@ -207,12 +225,18 @@ func findOpenPullRequestForHead(ctx context.Context, client *githubv4.Client, ba
 	}
 
 	if result == nil {
-		return baseRepo, nil, errPullRequestNotFound
+		return baseRepo, nil, ErrPullRequestNotFound
 	}
 	return baseRepo, result, nil
 }
 
-func createPullRequest(ctx context.Context, client *githubv4.Client, baseRepo *gitHubRepository, pr *pullRequest) error {
+// ErrPullRequestNotFound is returned
+// when [FindOpenPullRequestForHead] cannot find a matching pull request.
+var ErrPullRequestNotFound = errors.New("pull request not found")
+
+// CreatePullRequest creates a pull request in the given repository.
+// The pull request's ID, Number, and URL will be filled in if the request succeeds.
+func CreatePullRequest(ctx context.Context, client *githubv4.Client, baseRepo *Repository, pr *PullRequest) error {
 	var mutation struct {
 		CreatePullRequest struct {
 			PullRequest struct {
@@ -228,7 +252,7 @@ func createPullRequest(ctx context.Context, client *githubv4.Client, baseRepo *g
 		qualifiedHeadRef = pr.HeadRepository.Owner.Login + ":" + pr.HeadRefName
 	}
 	log.Debugf(ctx, "Creating pull request on %v for %s ← %s...",
-		baseRepo.path(), pr.BaseRefName, qualifiedHeadRef)
+		baseRepo.Path(), pr.BaseRefName, qualifiedHeadRef)
 	err := client.Mutate(ctx, &mutation, githubv4.CreatePullRequestInput{
 		RepositoryID: baseRepo.ID,
 		Title:        pr.Title,
@@ -240,7 +264,7 @@ func createPullRequest(ctx context.Context, client *githubv4.Client, baseRepo *g
 		HeadRepositoryID: new(pr.HeadRepository.ID),
 	}, nil)
 	if err != nil {
-		return fmt.Errorf("create pull request on %v for %s: %v", baseRepo.path(), qualifiedHeadRef, err)
+		return fmt.Errorf("create pull request on %v for %s: %v", baseRepo.Path(), qualifiedHeadRef, err)
 	}
 
 	pr.ID = mutation.CreatePullRequest.PullRequest.ID
@@ -249,8 +273,8 @@ func createPullRequest(ctx context.Context, client *githubv4.Client, baseRepo *g
 	return nil
 }
 
-// updatePullRequest updates the body and base ref name of the pull request.
-func updatePullRequest(ctx context.Context, client *githubv4.Client, baseRepoPath gitHubRepositoryPath, pr *pullRequest) error {
+// UpdatePullRequest updates the body and base ref name of the pull request.
+func UpdatePullRequest(ctx context.Context, client *githubv4.Client, baseRepoPath RepositoryPath, pr *PullRequest) error {
 	var mutation struct {
 		UpdatePullRequest struct {
 			_ struct{} `graphql:"..."`
@@ -270,9 +294,9 @@ func updatePullRequest(ctx context.Context, client *githubv4.Client, baseRepoPat
 	return nil
 }
 
-// updatePullRequestDraftStatus updates the draft status of the pull request
+// UpdatePullRequestDraftStatus updates the draft status of the pull request
 // to the value of pr.IsDraft.
-func updatePullRequestDraftStatus(ctx context.Context, client *githubv4.Client, baseRepoPath gitHubRepositoryPath, pr *pullRequest) error {
+func UpdatePullRequestDraftStatus(ctx context.Context, client *githubv4.Client, baseRepoPath RepositoryPath, pr *PullRequest) error {
 	if pr.IsDraft {
 		var mutation struct {
 			ConvertPullRequestToDraft struct {
@@ -304,7 +328,11 @@ func updatePullRequestDraftStatus(ctx context.Context, client *githubv4.Client, 
 	return nil
 }
 
-func readGitHubPullRequestTemplate(ctx context.Context, jj *jujutsu.Jujutsu, revision string) string {
+// ReadPullRequestTemplate attempts to read the GitHub [pull request template]
+// from the Jujutsu repository at the given revision.
+//
+// [pull request template]: https://docs.github.com/en/communities/using-templates-to-encourage-useful-issues-and-pull-requests/about-issue-and-pull-request-templates
+func ReadPullRequestTemplate(ctx context.Context, jj *jujutsu.Jujutsu, revision string) string {
 	potential := []string{
 		"root-file:pull_request_template.md",
 		"root-file:PULL_REQUEST_TEMPLATE/pull_request_template.md",
@@ -330,16 +358,16 @@ func readGitHubPullRequestTemplate(ctx context.Context, jj *jujutsu.Jujutsu, rev
 	return ""
 }
 
-var errPullRequestNotFound = errors.New("pull request not found")
-
-func newGitHubHTTPClient(token string) *http.Client {
+// NewHTTPClient returns an [*http.Client]
+// that will authenticate requests to the GitHub API with the given token.
+func NewHTTPClient(token string, transport http.RoundTripper) *http.Client {
 	return &http.Client{
 		Transport: httptransport.UserAgent{
 			UserAgent: "https://github.com/zombiezen/jj-domino",
 			RoundTripper: httptransport.BearerToken{
 				Host:         "api.github.com",
 				Token:        token,
-				RoundTripper: http.DefaultTransport,
+				RoundTripper: transport,
 			},
 		},
 	}

@@ -32,19 +32,20 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/shurcooL/githubv4"
+	"zombiezen.com/go/jj-domino/internal/github"
 	"zombiezen.com/go/jj-domino/internal/jujutsu"
 )
 
 func TestWriteStackFooter(t *testing.T) {
-	repository := &gitHubRepository{
-		Owner: &gitHubRepositoryOwner{Login: "zombiezen"},
+	repository := &github.Repository{
+		Owner: &github.RepositoryOwner{Login: "zombiezen"},
 		Name:  "jj-domino",
 	}
 
 	tests := []struct {
 		name  string
 		graph diffGraph
-		prs   map[string]*pullRequest
+		prs   map[string]*github.PullRequest
 		want  map[string]string
 	}{
 		{
@@ -64,7 +65,7 @@ func TestWriteStackFooter(t *testing.T) {
 				},
 				[]string{"foo"},
 			),
-			prs: map[string]*pullRequest{
+			prs: map[string]*github.PullRequest{
 				"foo": {
 					Number:         123,
 					BaseRefName:    "main",
@@ -101,7 +102,7 @@ func TestWriteStackFooter(t *testing.T) {
 				},
 				[]string{"bar"},
 			),
-			prs: map[string]*pullRequest{
+			prs: map[string]*github.PullRequest{
 				"foo": {
 					Number:         123,
 					BaseRefName:    "main",
@@ -110,7 +111,7 @@ func TestWriteStackFooter(t *testing.T) {
 					URL: githubv4.URI{URL: &url.URL{
 						Scheme: "https",
 						Host:   "github.com",
-						Path:   "/" + repository.path().String() + "/pull/123",
+						Path:   "/" + repository.Path().String() + "/pull/123",
 					}},
 				},
 				"bar": {
@@ -121,7 +122,7 @@ func TestWriteStackFooter(t *testing.T) {
 					URL: githubv4.URI{URL: &url.URL{
 						Scheme: "https",
 						Host:   "github.com",
-						Path:   "/" + repository.path().String() + "/pull/456",
+						Path:   "/" + repository.Path().String() + "/pull/456",
 					}},
 				},
 			},
@@ -131,7 +132,7 @@ func TestWriteStackFooter(t *testing.T) {
 					" 1. *→ this pull request ←*\n" +
 					" 2. #456\n",
 				"bar": stackFooterPreamble +
-					fmt.Sprintf(stackFooterChangesSection, "#123", "commit", "https://github.com/"+repository.path().String()+"/pull/456/changes/4567") +
+					fmt.Sprintf(stackFooterChangesSection, "#123", "commit", "https://github.com/"+repository.Path().String()+"/pull/456/changes/4567") +
 					stackFooterRelatedSectionIntro +
 					" 1. #123\n" +
 					" 2. *→ this pull request ←*\n",
@@ -166,7 +167,7 @@ func TestWriteStackFooter(t *testing.T) {
 				},
 				[]string{"bar"},
 			),
-			prs: map[string]*pullRequest{
+			prs: map[string]*github.PullRequest{
 				"foo": {
 					Number:         123,
 					BaseRefName:    "main",
@@ -175,7 +176,7 @@ func TestWriteStackFooter(t *testing.T) {
 					URL: githubv4.URI{URL: &url.URL{
 						Scheme: "https",
 						Host:   "github.com",
-						Path:   "/" + repository.path().String() + "/pull/123",
+						Path:   "/" + repository.Path().String() + "/pull/123",
 					}},
 				},
 				"bar": {
@@ -186,7 +187,7 @@ func TestWriteStackFooter(t *testing.T) {
 					URL: githubv4.URI{URL: &url.URL{
 						Scheme: "https",
 						Host:   "github.com",
-						Path:   "/" + repository.path().String() + "/pull/456",
+						Path:   "/" + repository.Path().String() + "/pull/456",
 					}},
 				},
 			},
@@ -196,7 +197,7 @@ func TestWriteStackFooter(t *testing.T) {
 					" 1. *→ this pull request ←*\n" +
 					" 2. #456\n",
 				"bar": stackFooterPreamble +
-					fmt.Sprintf(stackFooterChangesSection, "#123", "2 commits", "https://github.com/"+repository.path().String()+"/pull/456/changes/4567..89ab") +
+					fmt.Sprintf(stackFooterChangesSection, "#123", "2 commits", "https://github.com/"+repository.Path().String()+"/pull/456/changes/4567..89ab") +
 					stackFooterRelatedSectionIntro +
 					" 1. #123\n" +
 					" 2. *→ this pull request ←*\n",
@@ -243,7 +244,7 @@ func TestWriteStackFooter(t *testing.T) {
 				},
 				[]string{"c", "d"},
 			),
-			prs: map[string]*pullRequest{
+			prs: map[string]*github.PullRequest{
 				"a": {
 					Number:         123,
 					BaseRefName:    "main",
@@ -252,7 +253,7 @@ func TestWriteStackFooter(t *testing.T) {
 					URL: githubv4.URI{URL: &url.URL{
 						Scheme: "https",
 						Host:   "github.com",
-						Path:   "/" + repository.path().String() + "/pull/123",
+						Path:   "/" + repository.Path().String() + "/pull/123",
 					}},
 				},
 				"b": {
@@ -263,7 +264,7 @@ func TestWriteStackFooter(t *testing.T) {
 					URL: githubv4.URI{URL: &url.URL{
 						Scheme: "https",
 						Host:   "github.com",
-						Path:   "/" + repository.path().String() + "/pull/4567",
+						Path:   "/" + repository.Path().String() + "/pull/4567",
 					}},
 				},
 				"c": {
@@ -274,7 +275,7 @@ func TestWriteStackFooter(t *testing.T) {
 					URL: githubv4.URI{URL: &url.URL{
 						Scheme: "https",
 						Host:   "github.com",
-						Path:   "/" + repository.path().String() + "/pull/8910",
+						Path:   "/" + repository.Path().String() + "/pull/8910",
 					}},
 				},
 				"d": {
@@ -285,7 +286,7 @@ func TestWriteStackFooter(t *testing.T) {
 					URL: githubv4.URI{URL: &url.URL{
 						Scheme: "https",
 						Host:   "github.com",
-						Path:   "/" + repository.path().String() + "/pull/9999",
+						Path:   "/" + repository.Path().String() + "/pull/9999",
 					}},
 				},
 			},
@@ -296,7 +297,7 @@ func TestWriteStackFooter(t *testing.T) {
 					" 2. #4567\n" +
 					" 3. …multiple pull requests…\n",
 				"b": stackFooterPreamble +
-					fmt.Sprintf(stackFooterChangesSection, "#123", "commit", "https://github.com/"+repository.path().String()+"/pull/4567/changes/4567") +
+					fmt.Sprintf(stackFooterChangesSection, "#123", "commit", "https://github.com/"+repository.Path().String()+"/pull/4567/changes/4567") +
 					stackFooterRelatedSectionIntro +
 					" 1. #123\n" +
 					" 2. *→ this pull request ←*\n" +
@@ -305,13 +306,13 @@ func TestWriteStackFooter(t *testing.T) {
 					"- #8910\n" +
 					"- #9999\n",
 				"c": stackFooterPreamble +
-					fmt.Sprintf(stackFooterChangesSection, "#4567", "commit", "https://github.com/"+repository.path().String()+"/pull/8910/changes/89ab") +
+					fmt.Sprintf(stackFooterChangesSection, "#4567", "commit", "https://github.com/"+repository.Path().String()+"/pull/8910/changes/89ab") +
 					stackFooterRelatedSectionIntro +
 					" 1. #123\n" +
 					" 2. #4567\n" +
 					" 3. *→ this pull request ←*\n",
 				"d": stackFooterPreamble +
-					fmt.Sprintf(stackFooterChangesSection, "#4567", "commit", "https://github.com/"+repository.path().String()+"/pull/9999/changes/cdef") +
+					fmt.Sprintf(stackFooterChangesSection, "#4567", "commit", "https://github.com/"+repository.Path().String()+"/pull/9999/changes/cdef") +
 					stackFooterRelatedSectionIntro +
 					" 1. #123\n" +
 					" 2. #4567\n" +
@@ -351,7 +352,7 @@ func TestWriteStackFooter(t *testing.T) {
 				},
 				[]string{"b", "c"},
 			),
-			prs: map[string]*pullRequest{
+			prs: map[string]*github.PullRequest{
 				"a": {
 					Number:         123,
 					BaseRefName:    "main",
@@ -360,7 +361,7 @@ func TestWriteStackFooter(t *testing.T) {
 					URL: githubv4.URI{URL: &url.URL{
 						Scheme: "https",
 						Host:   "github.com",
-						Path:   "/" + repository.path().String() + "/pull/123",
+						Path:   "/" + repository.Path().String() + "/pull/123",
 					}},
 				},
 				"b": {
@@ -371,7 +372,7 @@ func TestWriteStackFooter(t *testing.T) {
 					URL: githubv4.URI{URL: &url.URL{
 						Scheme: "https",
 						Host:   "github.com",
-						Path:   "/" + repository.path().String() + "/pull/4567",
+						Path:   "/" + repository.Path().String() + "/pull/4567",
 					}},
 				},
 				"c": {
@@ -382,7 +383,7 @@ func TestWriteStackFooter(t *testing.T) {
 					URL: githubv4.URI{URL: &url.URL{
 						Scheme: "https",
 						Host:   "github.com",
-						Path:   "/" + repository.path().String() + "/pull/8910",
+						Path:   "/" + repository.Path().String() + "/pull/8910",
 					}},
 				},
 			},
@@ -393,12 +394,12 @@ func TestWriteStackFooter(t *testing.T) {
 					"- #4567\n" +
 					"- #8910\n",
 				"b": stackFooterPreamble +
-					fmt.Sprintf(stackFooterChangesSection, "#123", "commit", "https://github.com/"+repository.path().String()+"/pull/4567/changes/4567") +
+					fmt.Sprintf(stackFooterChangesSection, "#123", "commit", "https://github.com/"+repository.Path().String()+"/pull/4567/changes/4567") +
 					stackFooterRelatedSectionIntro +
 					" 1. #123\n" +
 					" 2. *→ this pull request ←*\n",
 				"c": stackFooterPreamble +
-					fmt.Sprintf(stackFooterChangesSection, "#123", "commit", "https://github.com/"+repository.path().String()+"/pull/8910/changes/89ab") +
+					fmt.Sprintf(stackFooterChangesSection, "#123", "commit", "https://github.com/"+repository.Path().String()+"/pull/8910/changes/89ab") +
 					stackFooterRelatedSectionIntro +
 					" 1. #123\n" +
 					" 2. *→ this pull request ←*\n",
@@ -445,7 +446,7 @@ func TestWriteStackFooter(t *testing.T) {
 				},
 				[]string{"c", "d"},
 			),
-			prs: map[string]*pullRequest{
+			prs: map[string]*github.PullRequest{
 				"a": {
 					Number:         123,
 					BaseRefName:    "main",
@@ -454,7 +455,7 @@ func TestWriteStackFooter(t *testing.T) {
 					URL: githubv4.URI{URL: &url.URL{
 						Scheme: "https",
 						Host:   "github.com",
-						Path:   "/" + repository.path().String() + "/pull/123",
+						Path:   "/" + repository.Path().String() + "/pull/123",
 					}},
 				},
 				"b": {
@@ -465,7 +466,7 @@ func TestWriteStackFooter(t *testing.T) {
 					URL: githubv4.URI{URL: &url.URL{
 						Scheme: "https",
 						Host:   "github.com",
-						Path:   "/" + repository.path().String() + "/pull/4567",
+						Path:   "/" + repository.Path().String() + "/pull/4567",
 					}},
 				},
 				"c": {
@@ -476,7 +477,7 @@ func TestWriteStackFooter(t *testing.T) {
 					URL: githubv4.URI{URL: &url.URL{
 						Scheme: "https",
 						Host:   "github.com",
-						Path:   "/" + repository.path().String() + "/pull/8910",
+						Path:   "/" + repository.Path().String() + "/pull/8910",
 					}},
 				},
 				"d": {
@@ -487,7 +488,7 @@ func TestWriteStackFooter(t *testing.T) {
 					URL: githubv4.URI{URL: &url.URL{
 						Scheme: "https",
 						Host:   "github.com",
-						Path:   "/" + repository.path().String() + "/pull/9999",
+						Path:   "/" + repository.Path().String() + "/pull/9999",
 					}},
 				},
 			},
@@ -503,7 +504,7 @@ func TestWriteStackFooter(t *testing.T) {
 					" 2. #8910\n" +
 					" 3. #9999\n",
 				"c": stackFooterPreamble +
-					fmt.Sprintf(stackFooterChangesSection, "#123 and #4567", "commit", "https://github.com/"+repository.path().String()+"/pull/8910/changes/89ab") +
+					fmt.Sprintf(stackFooterChangesSection, "#123 and #4567", "commit", "https://github.com/"+repository.Path().String()+"/pull/8910/changes/89ab") +
 					stackFooterRelatedSectionIntro +
 					stackFooterParentsIntro +
 					"- #123\n" +
@@ -512,7 +513,7 @@ func TestWriteStackFooter(t *testing.T) {
 					stackFooterChildrenIntro +
 					"- #9999\n",
 				"d": stackFooterPreamble +
-					fmt.Sprintf(stackFooterChangesSection, "#8910", "commit", "https://github.com/"+repository.path().String()+"/pull/9999/changes/cdef") +
+					fmt.Sprintf(stackFooterChangesSection, "#8910", "commit", "https://github.com/"+repository.Path().String()+"/pull/9999/changes/cdef") +
 					stackFooterRelatedSectionIntro +
 					"- …multiple pull requests…\n" +
 					"- #8910\n" +
@@ -560,7 +561,7 @@ func TestWriteStackFooter(t *testing.T) {
 				},
 				[]string{"d"},
 			),
-			prs: map[string]*pullRequest{
+			prs: map[string]*github.PullRequest{
 				"a": {
 					Number:         123,
 					BaseRefName:    "main",
@@ -569,7 +570,7 @@ func TestWriteStackFooter(t *testing.T) {
 					URL: githubv4.URI{URL: &url.URL{
 						Scheme: "https",
 						Host:   "github.com",
-						Path:   "/" + repository.path().String() + "/pull/123",
+						Path:   "/" + repository.Path().String() + "/pull/123",
 					}},
 				},
 				"b": {
@@ -580,7 +581,7 @@ func TestWriteStackFooter(t *testing.T) {
 					URL: githubv4.URI{URL: &url.URL{
 						Scheme: "https",
 						Host:   "github.com",
-						Path:   "/" + repository.path().String() + "/pull/4567",
+						Path:   "/" + repository.Path().String() + "/pull/4567",
 					}},
 				},
 				"c": {
@@ -591,7 +592,7 @@ func TestWriteStackFooter(t *testing.T) {
 					URL: githubv4.URI{URL: &url.URL{
 						Scheme: "https",
 						Host:   "github.com",
-						Path:   "/" + repository.path().String() + "/pull/8910",
+						Path:   "/" + repository.Path().String() + "/pull/8910",
 					}},
 				},
 				"d": {
@@ -602,7 +603,7 @@ func TestWriteStackFooter(t *testing.T) {
 					URL: githubv4.URI{URL: &url.URL{
 						Scheme: "https",
 						Host:   "github.com",
-						Path:   "/" + repository.path().String() + "/pull/9999",
+						Path:   "/" + repository.Path().String() + "/pull/9999",
 					}},
 				},
 			},
@@ -620,7 +621,7 @@ func TestWriteStackFooter(t *testing.T) {
 					" 1. *→ this pull request ←*\n" +
 					" 2. #9999\n",
 				"d": stackFooterPreamble +
-					fmt.Sprintf(stackFooterChangesSection, "#123, #4567, and #8910", "commit", "https://github.com/"+repository.path().String()+"/pull/9999/changes/cdef") +
+					fmt.Sprintf(stackFooterChangesSection, "#123, #4567, and #8910", "commit", "https://github.com/"+repository.Path().String()+"/pull/9999/changes/cdef") +
 					stackFooterRelatedSectionIntro +
 					stackFooterParentsIntro +
 					"- #123\n" +
