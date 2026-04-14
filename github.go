@@ -33,6 +33,7 @@ import (
 
 	"gg-scm.io/pkg/git"
 	"github.com/shurcooL/githubv4"
+	"zombiezen.com/go/jj-domino/internal/httptransport"
 	"zombiezen.com/go/jj-domino/internal/jujutsu"
 	"zombiezen.com/go/log"
 )
@@ -333,12 +334,12 @@ var errPullRequestNotFound = errors.New("pull request not found")
 
 func newGitHubHTTPClient(token string) *http.Client {
 	return &http.Client{
-		Transport: userAgentTransport{
-			userAgent: "https://github.com/zombiezen/jj-domino",
-			rt: tokenTransport{
-				host:  "api.github.com",
-				token: token,
-				rt:    http.DefaultTransport,
+		Transport: httptransport.UserAgent{
+			UserAgent: "https://github.com/zombiezen/jj-domino",
+			RoundTripper: httptransport.BearerToken{
+				Host:         "api.github.com",
+				Token:        token,
+				RoundTripper: http.DefaultTransport,
 			},
 		},
 	}

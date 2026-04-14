@@ -20,31 +20,32 @@
 //
 // SPDX-License-Identifier: MIT
 
-package main
+// Package httptransport provides HTTP client middleware.
+package httptransport
 
 import "net/http"
 
-// tokenTransport is an [http.RoundTripper]
+// BearerToken is an [http.RoundTripper]
 // that adds an Authorization header to requests to a particular host.
-type tokenTransport struct {
-	host  string
-	token string
-	rt    http.RoundTripper
+type BearerToken struct {
+	Host         string
+	Token        string
+	RoundTripper http.RoundTripper
 }
 
 // RoundTrip implements [http.RoundTripper]
 // by adding an Authorization header if applicable.
-func (tt tokenTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if req.URL.Host == tt.host && (req.Host == "" || req.Host == tt.host) {
+func (bt BearerToken) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.Host == bt.Host && (req.Host == "" || req.Host == bt.Host) {
 		req = req.Clone(req.Context())
-		req.Header.Set("Authorization", "Bearer "+tt.token)
+		req.Header.Set("Authorization", "Bearer "+bt.Token)
 	}
-	return tt.rt.RoundTrip(req)
+	return bt.RoundTripper.RoundTrip(req)
 }
 
 // CloseIdleConnections calls tt.rt.CloseIdleConnections(), if present.
-func (tt tokenTransport) CloseIdleConnections() {
-	cic, ok := tt.rt.(interface {
+func (bt BearerToken) CloseIdleConnections() {
+	cic, ok := bt.RoundTripper.(interface {
 		CloseIdleConnections()
 	})
 	if ok {
@@ -52,26 +53,26 @@ func (tt tokenTransport) CloseIdleConnections() {
 	}
 }
 
-// userAgentTransport is an [http.RoundTripper]
+// UserAgent is an [http.RoundTripper]
 // that adds a User-Agent header to requests.
-type userAgentTransport struct {
-	userAgent string
-	rt        http.RoundTripper
+type UserAgent struct {
+	UserAgent    string
+	RoundTripper http.RoundTripper
 }
 
 // RoundTrip implements [http.RoundTripper]
 // by adding an User-Agent header if not present.
-func (uat userAgentTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+func (ua UserAgent) RoundTrip(req *http.Request) (*http.Response, error) {
 	if len(req.Header.Values("User-Agent")) == 0 {
 		req = req.Clone(req.Context())
-		req.Header.Set("User-Agent", uat.userAgent)
+		req.Header.Set("User-Agent", ua.UserAgent)
 	}
-	return uat.rt.RoundTrip(req)
+	return ua.RoundTripper.RoundTrip(req)
 }
 
 // CloseIdleConnections calls uat.rt.CloseIdleConnections(), if present.
-func (uat userAgentTransport) CloseIdleConnections() {
-	cic, ok := uat.rt.(interface {
+func (ua UserAgent) CloseIdleConnections() {
+	cic, ok := ua.RoundTripper.(interface {
 		CloseIdleConnections()
 	})
 	if ok {
